@@ -1,0 +1,18 @@
+# Python
+scraper/venv/
+scraper/__pycache__/
+scraper/*.pyc
+scraper/*.pyo
+scraper/.env
+
+# Datos generados
+scraper/catalogo_*.json
+
+# Node
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+
+# Editor
+.vscode/
+*.DS_Store
