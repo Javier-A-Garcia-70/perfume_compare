@@ -8,6 +8,9 @@ venv/
 # Datos generados
 catalogo_*.json
 
+# Scripts locales de prueba
+test_*.py
+
 # Node
 node_modules/
 dist/
