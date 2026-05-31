@@ -1,0 +1,20 @@
+# Python
+rouge-app/scraper/venv/
+rouge-app/scraper/__pycache__/
+rouge-app/scraper/*.pyc
+rouge-app/scraper/*.pyo
+rouge-app/scraper/.env
+rouge-app/scraper/test_*.py
+
+# Datos generados
+catalogo_*.json
+rouge-app/scraper/catalogo_*.json
+
+# Node
+rouge-app/frontend/node_modules/
+rouge-app/frontend/dist/
+rouge-app/frontend/.env
+
+# Editor / OS
+.vscode/
+*.DS_Store
