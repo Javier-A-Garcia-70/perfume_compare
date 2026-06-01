@@ -1,381 +1,117 @@
-"""
-Comparador de Perfumes - Scraper unificado
-Rouge + Juleriaque → deduplicación → Supabase
-
-Correr con: python scraper_comparador.py
-"""
-
-import requests
-import json
-import re
-import time
-import os
-from datetime import datetime, timezone
-from sentence_transformers import SentenceTransformer
-from supabase import create_client, Client
-from dotenv import load_dotenv
-
-load_dotenv()
-
-SUPABASE_URL = os.environ["SUPABASE_URL"]
-SUPABASE_KEY = os.environ["SUPABASE_KEY"]
-MODEL_NAME   = "paraphrase-multilingual-MiniLM-L12-v2"
-
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-    "Accept": "application/json",
-}
-
-TIENDAS = {
-    "rouge": {
-        "base_url": "https://www.perfumeriasrouge.com/api/catalog_system/pub/products/search/fragancias",
-        "base_link": "https://www.perfumeriasrouge.com",
-    },
-    "juleriaque": {
-        "base_url": "https://www.juleriaque.com.ar/api/catalog_system/pub/products/search/fragancias",
-        "base_link": "https://www.juleriaque.com.ar",
-    },
-}
-
-COLORES_TIENDA = {
-    "rouge":      "#c9393e",
-    "juleriaque": "#1a5fa8",
-}
-
-# ─── NORMALIZACIÓN ───────────────────────────────────────────────
-
-TIPOS_MAP = {
-    "eau de parfum": "Eau de Parfum",
-    "edp":           "Eau de Parfum",
-    "parfum":        "Eau de Parfum",
-    "eau de toilette": "Eau de Toilette",
-    "edt":           "Eau de Toilette",
-    "toilette":      "Eau de Toilette",
-    "eau de cologne": "Eau de Cologne",
-    "edc":           "Eau de Cologne",
-    "colonia":       "Eau de Cologne",
-    "cologne":       "Eau de Cologne",
-    "cofre":         "Cofre / Set",
-    "cofret":        "Cofre / Set",
-    "set":           "Cofre / Set",
-    "body":          "Body / Splash",
-    "splash":        "Body / Splash",
-}
-
-def normalizar_tipo(nombre: str) -> str:
-    n = nombre.lower()
-    for k, v in TIPOS_MAP.items():
-        if k in n:
-            return v
-    return "Fragancia"
-
-def normalizar_tamaño(texto: str) -> str:
-    """Extrae y normaliza el tamaño: '100ML' → '100 ml'"""
-    match = re.search(r'(\d+(?:\.\d+)?)\s*ml', texto, re.IGNORECASE)
-    if match:
-        return f"{match.group(1)} ml"
-    return texto.strip().lower()
-
-def normalizar_nombre_base(nombre: str, tipo: str, tamaño: str) -> str:
-    """
-    Elimina del nombre el tipo, tamaño y otras partículas para quedarse
-    con el nombre base del perfume.
-    Ej: 'Blue Jeans EDT 75 ml' → 'Blue Jeans'
-    """
-    base = nombre
-    # Quitar tamaño
-    base = re.sub(r'\d+(?:\.\d+)?\s*ml', '', base, flags=re.IGNORECASE)
-    # Quitar tipo
-    for k in TIPOS_MAP:
-        base = re.sub(re.escape(k), '', base, flags=re.IGNORECASE)
-    # Quitar siglas comunes
-    for sig in ["EDP", "EDT", "EDC", "EAU"]:
-        base = re.sub(r'\b' + sig + r'\b', '', base, flags=re.IGNORECASE)
-    # Quitar "Ed. Limitada", "Ed. Especial", "X"
-    base = re.sub(r'Ed\.?\s*(Limitada|Especial|Ltda\.?)', '', base, flags=re.IGNORECASE)
-    base = re.sub(r'\bx\b', '', base, flags=re.IGNORECASE)
-    # Limpiar espacios y puntuación sobrante
-    base = re.sub(r'[,;.\-]+$', '', base.strip())
-    base = ' '.join(base.split())
-    return base.title()
-
-def generar_clave(marca: str, nombre_base: str, tipo: str, tamaño: str) -> str:
-    """Clave única normalizada para deduplicar entre tiendas."""
-    def norm(s):
-        return re.sub(r'\s+', ' ', s.lower().strip())
-    return f"{norm(marca)}|{norm(nombre_base)}|{norm(tipo)}|{norm(tamaño)}"
-
-def limpiar_html(texto: str) -> str:
-    if not texto:
-        return ""
-    sin_tags = re.sub(r"<[^>]+>", " ", texto)
-    return ' '.join(sin_tags.split()).strip()
-
-def detectar_genero(categorias: list) -> str:
-    rutas = [c.lower() for c in categorias]
-    for r in rutas:
-        if "hombre" in r or "masculino" in r:
-            return "Masculino"
-        if "mujer" in r or "femenino" in r:
-            return "Femenino"
-    return "Unisex"
-
-# ─── SCRAPING ────────────────────────────────────────────────────
-
-def scrape_tienda(nombre_tienda: str) -> list:
-    cfg    = TIENDAS[nombre_tienda]
-    url    = cfg["base_url"]
-    base   = cfg["base_link"]
-    desde, paso = 0, 50
-    items  = []
-
-    print(f"\nScrapeando {nombre_tienda}...")
-    while True:
-        endpoint = f"{url}?_from={desde}&_to={desde+paso-1}"
-        print(f"  {desde}–{desde+paso-1}...")
-        try:
-            r = requests.get(endpoint, headers=HEADERS, timeout=15)
-            r.raise_for_status()
-            data = r.json()
-        except Exception as e:
-            print(f"  Error: {e}")
-            break
-
-        if not data:
-            break
-
-        for prod in data:
-            categorias        = prod.get("categories", [])
-            genero            = detectar_genero(categorias)
-            descripcion_html  = prod.get("description", "").strip()
-            descripcion       = limpiar_html(descripcion_html)
-            nombre_producto   = prod.get("productName", "")
-
-            for item in prod.get("items", []):
-                oferta       = item["sellers"][0]["commertialOffer"]
-                precio_lista = oferta.get("ListPrice", 0)
-                precio_final = oferta.get("Price", 0)
-                stock        = oferta.get("AvailableQuantity", 0)
-
-                descuento = 0
-                if precio_lista > precio_final > 0:
-                    descuento = int(100 - (precio_final / precio_lista * 100))
-
-                imagenes = item.get("images", [])
-                imagen   = imagenes[0].get("imageUrl", "") if imagenes else ""
-
-                tamaño_raw   = item.get("name", "")
-                tipo         = normalizar_tipo(nombre_producto + " " + tamaño_raw)
-                tamaño       = normalizar_tamaño(tamaño_raw if tamaño_raw else nombre_producto)
-                nombre_base  = normalizar_nombre_base(nombre_producto, tipo, tamaño)
-                marca        = prod.get("brand", "")
-                clave        = generar_clave(marca, nombre_base, tipo, tamaño)
-
-                link = prod.get("link", "")
-                if link and not link.startswith("http"):
-                    link = base + link
-
-                items.append({
-                    "tienda":        nombre_tienda,
-                    "id_producto":   prod.get("productId"),
-                    "id_sku":        item.get("itemId"),
-                    "marca":         marca,
-                    "nombre_base":   nombre_base,
-                    "tipo":          tipo,
-                    "tamaño":        tamaño,
-                    "genero":        genero,
-                    "descripcion":   descripcion,
-                    "imagen":        imagen,
-                    "precio_lista":  precio_lista,
-                    "precio_final":  precio_final,
-                    "descuento":     descuento,
-                    "stock_estado":  "Con Stock" if stock > 0 else "Sin Stock",
-                    "link":          link,
-                    "clave_unica":   clave,
-                    "scraped_at":    datetime.now(timezone.utc).isoformat(),
-                })
-
-        desde += paso
-        time.sleep(0.4)
-
-    print(f"  Total {nombre_tienda}: {len(items)} variantes")
-    return items
-
-
-# ─── DEDUPLICACIÓN ───────────────────────────────────────────────
-
-def deduplicar(rouge_items: list, juleriaque_items: list) -> tuple[list, list]:
-    """
-    Retorna:
-      - perfumes_unicos: lista de entidades únicas (para tabla perfumes)
-      - tiendas_items: lista de registros por tienda (para tabla perfume_tiendas)
-    """
-    perfumes_map = {}  # clave_unica → perfume base
-
-    # Rouge tiene prioridad para imagen y descripción
-    for item in rouge_items + juleriaque_items:
-        clave = item["clave_unica"]
-        if clave not in perfumes_map:
-            perfumes_map[clave] = {
-                "marca":        item["marca"],
-                "nombre_base":  item["nombre_base"],
-                "tipo":         item["tipo"],
-                "tamaño":       item["tamaño"],
-                "genero":       item["genero"],
-                "descripcion":  item["descripcion"],
-                "imagen":       item["imagen"],
-                "clave_unica":  clave,
-            }
-        else:
-            # Si Rouge ya puso imagen/desc, no pisamos con Juleriaque
-            existing = perfumes_map[clave]
-            if item["tienda"] == "rouge":
-                if item["imagen"]:
-                    existing["imagen"] = item["imagen"]
-                if item["descripcion"]:
-                    existing["descripcion"] = item["descripcion"]
-            else:
-                # Juleriaque solo completa si falta
-                if not existing["imagen"] and item["imagen"]:
-                    existing["imagen"] = item["imagen"]
-                if not existing["descripcion"] and item["descripcion"]:
-                    existing["descripcion"] = item["descripcion"]
-
-    perfumes_unicos = list(perfumes_map.values())
-    tiendas_items   = rouge_items + juleriaque_items
-
-    print(f"\nDeduplicación:")
-    print(f"  Rouge:      {len(rouge_items)} variantes")
-    print(f"  Juleriaque: {len(juleriaque_items)} variantes")
-    print(f"  Únicos:     {len(perfumes_unicos)} perfumes")
-    print(f"  Solo Rouge:      {len([p for p in perfumes_unicos if p['clave_unica'] not in {i['clave_unica'] for i in juleriaque_items}])}")
-    print(f"  Solo Juleriaque: {len([p for p in perfumes_unicos if p['clave_unica'] not in {i['clave_unica'] for i in rouge_items}])}")
-    print(f"  En ambas:        {len([p for p in perfumes_unicos if p['clave_unica'] in {i['clave_unica'] for i in rouge_items} and p['clave_unica'] in {i['clave_unica'] for i in juleriaque_items}])}")
-
-    return perfumes_unicos, tiendas_items
-
-
-# ─── EMBEDDINGS ──────────────────────────────────────────────────
-
-def generar_embeddings(perfumes: list) -> list:
-    print(f"\nCargando modelo {MODEL_NAME}...")
-    model = SentenceTransformer(MODEL_NAME)
-
-    textos = []
-    for p in perfumes:
-        texto = f"{p['marca']} {p['nombre_base']} {p['tipo']} {p['genero']} {p.get('descripcion','')[:300]}"
-        textos.append(texto)
-
-    print(f"Generando embeddings para {len(textos)} perfumes...")
-    embeddings = model.encode(textos, show_progress_bar=True, batch_size=64)
-
-    for p, emb in zip(perfumes, embeddings):
-        p["embedding"] = emb.tolist()
-
-    return perfumes
-
-
-# ─── SUPABASE ────────────────────────────────────────────────────
-
-def subir_supabase(perfumes_unicos: list, tiendas_items: list):
-    supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-
-    # 1. Upsert perfumes únicos
-    print(f"\nSubiendo {len(perfumes_unicos)} perfumes únicos...")
-    batch = 50
-    clave_to_id = {}
-
-    for i in range(0, len(perfumes_unicos), batch):
-        lote = perfumes_unicos[i:i+batch]
-        rows = [{
-            "marca":        p["marca"],
-            "nombre_base":  p["nombre_base"],
-            "tipo":         p["tipo"],
-            "tamaño":       p["tamaño"],
-            "genero":       p["genero"],
-            "descripcion":  p.get("descripcion"),
-            "imagen":       p.get("imagen"),
-            "embedding":    p.get("embedding"),
-            "clave_unica":  p["clave_unica"],
-            "updated_at":   datetime.now(timezone.utc).isoformat(),
-        } for p in lote]
-
-        res = supabase.table("perfumes").upsert(rows, on_conflict="clave_unica").execute()
-        print(f"  Batch {i//batch+1}: {len(lote)} perfumes")
-
-    # Obtener IDs generados
-    res = supabase.table("perfumes").select("id, clave_unica").execute()
-    for row in res.data:
-        clave_to_id[row["clave_unica"]] = row["id"]
-
-    # 2. Upsert precios por tienda
-    print(f"\nSubiendo {len(tiendas_items)} registros de tiendas...")
-    tiendas_rows = []
-    for item in tiendas_items:
-        pid = clave_to_id.get(item["clave_unica"])
-        if not pid:
-            continue
-        tiendas_rows.append({
-            "perfume_id":   pid,
-            "tienda":       item["tienda"],
-            "id_sku":       item["id_sku"],
-            "id_producto":  item["id_producto"],
-            "precio_lista": item["precio_lista"],
-            "precio_final": item["precio_final"],
-            "descuento":    item["descuento"],
-            "stock_estado": item["stock_estado"],
-            "link":         item["link"],
-            "scraped_at":   item["scraped_at"],
-        })
-
-    for i in range(0, len(tiendas_rows), batch):
-        lote = tiendas_rows[i:i+batch]
-        supabase.table("perfume_tiendas").upsert(lote, on_conflict="tienda,id_sku").execute()
-        print(f"  Batch {i//batch+1}: {len(lote)} registros")
-
-    # 3. Historial de precios
-    print("\nGuardando historial...")
-    hist = [{
-        "tienda":       item["tienda"],
-        "id_sku":       item["id_sku"],
-        "precio_final": item["precio_final"],
-        "descuento":    item["descuento"],
-        "stock_estado": item["stock_estado"],
-        "registrado_at": item["scraped_at"],
-    } for item in tiendas_items]
-
-    for i in range(0, len(hist), 100):
-        supabase.table("precio_historial").insert(hist[i:i+100]).execute()
-
-    print("\nCarga completa.")
-
-
-# ─── MAIN ────────────────────────────────────────────────────────
-
-def main():
-    # Scraping
-    rouge_items      = scrape_tienda("rouge")
-    juleriaque_items = scrape_tienda("juleriaque")
-
-    # Deduplicar
-    perfumes_unicos, tiendas_items = deduplicar(rouge_items, juleriaque_items)
-
-    # Backup JSON
-    with open("catalogo_comparador.json", "w", encoding="utf-8") as f:
-        json.dump({
-            "perfumes": [{k:v for k,v in p.items() if k != "embedding"} for p in perfumes_unicos],
-            "tiendas":  tiendas_items,
-        }, f, ensure_ascii=False, indent=2)
-    print("Backup en catalogo_comparador.json")
-
-    # Embeddings
-    perfumes_unicos = generar_embeddings(perfumes_unicos)
-
-    # Supabase
-    subir_supabase(perfumes_unicos, tiendas_items)
-
-    print("\nListo.")
-
-
-if __name__ == "__main__":
-    main()
+-- COMPARADOR DE PERFUMES - Schema completo
+-- Ejecutar TODO junto en Supabase SQL Editor
+
+create extension if not exists vector;
+
+-- TABLA PERFUMES
+create table perfumes (
+  id            bigserial primary key,
+  marca         text not null,
+  nombre_base   text not null,
+  tipo          text not null,
+  tamaño        text not null,
+  genero        text,
+  descripcion   text,
+  imagen        text,
+  embedding     vector(384),
+  clave_unica   text unique,
+  created_at    timestamptz default now(),
+  updated_at    timestamptz default now()
+);
+
+-- TABLA PRECIOS POR TIENDA
+create table perfume_tiendas (
+  id            bigserial primary key,
+  perfume_id    bigint not null references perfumes(id) on delete cascade,
+  tienda        text not null,
+  id_sku        text not null,
+  id_producto   text,
+  precio_lista  numeric(12,2),
+  precio_final  numeric(12,2),
+  descuento     int default 0,
+  stock_estado  text default 'Con Stock',
+  link          text,
+  scraped_at    timestamptz default now(),
+  unique(tienda, id_sku)
+);
+
+-- TABLA HISTORIAL
+create table precio_historial (
+  id            bigserial primary key,
+  tienda        text not null,
+  id_sku        text not null,
+  precio_final  numeric(12,2),
+  descuento     int,
+  stock_estado  text,
+  registrado_at timestamptz default now()
+);
+
+-- TABLA FAVORITOS
+create table favoritos (
+  id                  bigserial primary key,
+  user_id             uuid not null references auth.users(id) on delete cascade,
+  perfume_id          bigint not null references perfumes(id) on delete cascade,
+  seguimiento_semanas int default 1,
+  precio_al_guardar   jsonb,
+  notificado_at       timestamptz,
+  created_at          timestamptz default now(),
+  unique(user_id, perfume_id)
+);
+
+-- TABLA PUSH
+create table push_suscripciones (
+  id          bigserial primary key,
+  user_id     uuid not null references auth.users(id) on delete cascade,
+  endpoint    text not null,
+  key_p256dh  text not null,
+  key_auth    text not null,
+  created_at  timestamptz default now(),
+  unique(user_id, endpoint)
+);
+
+-- ÍNDICES
+create index perfumes_embedding_idx on perfumes using ivfflat (embedding vector_cosine_ops) with (lists = 50);
+create index perfumes_marca_idx     on perfumes(marca);
+create index perfumes_genero_idx    on perfumes(genero);
+create index perfumes_clave_idx     on perfumes(clave_unica);
+create index tiendas_perfume_idx    on perfume_tiendas(perfume_id);
+create index tiendas_tienda_idx     on perfume_tiendas(tienda);
+create index tiendas_desc_idx       on perfume_tiendas(descuento desc);
+create index historial_sku_idx      on precio_historial(id_sku, registrado_at desc);
+
+-- VISTA
+create view perfumes_con_precios as
+select
+  p.id, p.marca, p.nombre_base, p.tipo, p.tamaño, p.genero,
+  p.descripcion, p.imagen, p.clave_unica,
+  max(case when t.tienda = 'rouge'      then t.precio_final  end) as rouge_precio,
+  max(case when t.tienda = 'rouge'      then t.precio_lista  end) as rouge_precio_lista,
+  max(case when t.tienda = 'rouge'      then t.descuento     end) as rouge_descuento,
+  max(case when t.tienda = 'rouge'      then t.link          end) as rouge_link,
+  max(case when t.tienda = 'rouge'      then t.stock_estado  end) as rouge_stock,
+  max(case when t.tienda = 'juleriaque' then t.precio_final  end) as juleriaque_precio,
+  max(case when t.tienda = 'juleriaque' then t.precio_lista  end) as juleriaque_precio_lista,
+  max(case when t.tienda = 'juleriaque' then t.descuento     end) as juleriaque_descuento,
+  max(case when t.tienda = 'juleriaque' then t.link          end) as juleriaque_link,
+  max(case when t.tienda = 'juleriaque' then t.stock_estado  end) as juleriaque_stock,
+  bool_or(t.tienda = 'rouge')      as en_rouge,
+  bool_or(t.tienda = 'juleriaque') as en_juleriaque,
+  bool_or(t.descuento > 0)         as tiene_oferta,
+  min(t.precio_final)              as precio_min
+from perfumes p
+left join perfume_tiendas t on t.perfume_id = p.id
+group by p.id, p.marca, p.nombre_base, p.tipo, p.tamaño,
+         p.genero, p.descripcion, p.imagen, p.clave_unica;
+
+-- RLS
+alter table perfumes           enable row level security;
+alter table perfume_tiendas    enable row level security;
+alter table precio_historial   enable row level security;
+alter table favoritos          enable row level security;
+alter table push_suscripciones enable row level security;
+
+create policy "perfumes_public"   on perfumes        for select using (true);
+create policy "tiendas_public"    on perfume_tiendas for select using (true);
+create policy "historial_public"  on precio_historial for select using (true);
+create policy "favoritos_usuario" on favoritos        for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "push_usuario"      on push_suscripciones for all using (auth.uid() = user_id) with check (auth.uid() = user_id);

@@ -1,9 +1,12 @@
 import { useState, useEffect, useRef } from "react";
 import { Search, Menu, X, Heart, Camera, ChevronRight, ArrowLeft, Sparkles, ExternalLink } from "lucide-react";
 
-const SUPABASE_URL  = import.meta.env.VITE_SUPABASE_URL  || "";
-const SUPABASE_KEY  = import.meta.env.VITE_SUPABASE_ANON_KEY || "";
-const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
+const SUPABASE_URL    = import.meta.env.VITE_SUPABASE_URL      || "";
+const SUPABASE_KEY    = import.meta.env.VITE_SUPABASE_ANON_KEY  || "";
+
+// Backend FastAPI en local (puerto 8000) — la key nunca llega al browser
+const ANTHROPIC_URL     = "http://localhost:8001/api/claude";
+const ANTHROPIC_HEADERS = { "Content-Type": "application/json" };
 
 const TIENDAS = {
   rouge:      { label: "Rouge",      color: "#c9393e", bg: "#2a0a0a" },
@@ -57,28 +60,91 @@ function agruparVariantes(data) {
 }
 
 async function buscarConIA(query, productos) {
-  const prompt = `Catálogo de perfumes:
-${JSON.stringify(productos.map(p => ({ id: p.id, marca: p.marca, nombre: p.nombre_base, tipo: p.tipo, genero: p.genero, notas: p.descripcion?.slice(0,100) })))}
-Búsqueda: "${query}"
-Interpretá semánticamente. Devolvé SOLO array JSON de ids relevantes (máx 15). Sin texto extra.`;
+  const q = query.toLowerCase();
+  const palabras = q.split(/\s+/).filter(Boolean);
+
+  // Texto: todas las palabras de la query deben aparecer en marca+nombre combinados
+  const textMatches = new Set(
+    productos.flatMap(p => (p.variantes || [p]))
+      .filter(v => {
+        const haystack = `${v.marca || ""} ${v.nombre_base || ""}`.toLowerCase();
+        return palabras.every(w => haystack.includes(w));
+      })
+      .map(v => v.id)
+  );
+
+  console.log("[buscar] query:", q, "| palabras:", palabras, "| textMatches:", textMatches.size);
+  if (textMatches.size > 0) {
+    const ejemplo = productos.flatMap(p => p.variantes || [p]).find(v => textMatches.has(v.id));
+    console.log("[buscar] ejemplo match:", ejemplo?.marca, ejemplo?.nombre_base, "id:", ejemplo?.id);
+  } else {
+    const primero = productos[0];
+    console.log("[buscar] primer producto:", primero?.marca, primero?.nombre_base, "variantes:", primero?.variantes?.length, "id:", primero?.id, "v[0].id:", primero?.variantes?.[0]?.id);
+  }
+
   try {
-    const res = await fetch(ANTHROPIC_URL, { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:300, messages:[{role:"user",content:prompt}] }) });
+    const res = await fetch("http://localhost:8001/api/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query, limit: 100 }),
+    });
     const data = await res.json();
-    const ids = JSON.parse(data.content?.[0]?.text?.replace(/```json|```/g,"").trim() || "[]");
-    return productos.filter(p => ids.includes(p.id));
+    const porSimilitud = Object.fromEntries((data.results || []).map(r => [r.id, r.similarity]));
+
+    // Si hay matches de texto, usamos solo esos (búsqueda por nombre/marca)
+    // Si no hay texto, usamos los vectoriales (búsqueda semántica)
+    const todosIds = textMatches.size > 0
+      ? textMatches
+      : new Set((data.results || []).map(r => r.id));
+
+    return productos
+      .filter(p => (p.variantes || [p]).some(v => todosIds.has(v.id)))
+      .sort((a, b) => {
+        const vars = vs => (vs.variantes || [vs]).map(v => v.id);
+        // Texto exacto primero, luego por similitud vectorial
+        const aTexto = vars(a).some(id => textMatches.has(id)) ? 1 : 0;
+        const bTexto = vars(b).some(id => textMatches.has(id)) ? 1 : 0;
+        if (bTexto !== aTexto) return bTexto - aTexto;
+        const simA = Math.max(...vars(a).map(id => porSimilitud[id] || 0));
+        const simB = Math.max(...vars(b).map(id => porSimilitud[id] || 0));
+        return simB - simA;
+      });
   } catch {
-    const q = query.toLowerCase();
-    return productos.filter(p => p.nombre_base.toLowerCase().includes(q) || p.marca.toLowerCase().includes(q) || (p.descripcion||"").toLowerCase().includes(q));
+    // Fallback solo texto
+    return productos.filter(p =>
+      (p.variantes || [p]).some(v =>
+        v.nombre_base?.toLowerCase().includes(q) ||
+        v.marca?.toLowerCase().includes(q) ||
+        (v.descripcion||"").toLowerCase().includes(q)
+      )
+    );
   }
 }
 
 async function buscarPorImagen(base64, productos) {
-  const prompt = `Identificá el perfume en esta imagen. Catálogo: ${JSON.stringify(productos.map(p => ({ id: p.id, marca: p.marca, nombre: p.nombre_base, tipo: p.tipo })))}. Devolvé SOLO array JSON de ids coincidentes (máx 5). Sin texto extra.`;
+  // Solo pedir identificación, sin mandar el catálogo completo
+  const prompt = `Identificá el perfume en esta imagen. Devolvé SOLO un JSON con {"marca": "...", "nombre": "..."}. Sin texto extra.`;
+  // Detectar media_type real desde el prefijo base64
+  let media_type = "image/jpeg";
+  if (base64.startsWith("iVBORw"))      media_type = "image/png";
+  else if (base64.startsWith("UklGR"))  media_type = "image/webp";
+  else if (base64.startsWith("R0lGOD")) media_type = "image/gif";
   try {
-    const res = await fetch(ANTHROPIC_URL, { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:200, messages:[{role:"user", content:[{type:"image",source:{type:"base64",media_type:"image/jpeg",data:base64}},{type:"text",text:prompt}]}] }) });
+    const res = await fetch(ANTHROPIC_URL, { method:"POST", headers:ANTHROPIC_HEADERS, body: JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:100, messages:[{role:"user", content:[{type:"image",source:{type:"base64",media_type,data:base64}},{type:"text",text:prompt}]}] }) });
     const data = await res.json();
-    const ids = JSON.parse(data.content?.[0]?.text?.replace(/```json|```/g,"").trim() || "[]");
-    return productos.filter(p => ids.includes(p.id));
+    const info = JSON.parse(data.content?.[0]?.text?.replace(/```json|```/g,"").trim() || "{}");
+    const marca = (info.marca || "").toLowerCase();
+    const nombre = (info.nombre || "").toLowerCase();
+    console.log("[imagen] Claude identificó:", info, "| marca:", marca, "| nombre:", nombre);
+    if (!marca && !nombre) return [];
+    // Filtrar localmente: marca exacta + nombre del producto contenido en lo que identificó Claude
+    return productos.filter(p => {
+      const pm = p.marca?.toLowerCase() || "";
+      const pn = p.nombre_base?.toLowerCase() || "";
+      const marcaMatch = marca && pm && pm.includes(marca);
+      const nombreMatch = nombre && pn && nombre.includes(pn);
+      return marcaMatch && nombreMatch;
+    }).slice(0, 5);
   } catch { return []; }
 }
 
