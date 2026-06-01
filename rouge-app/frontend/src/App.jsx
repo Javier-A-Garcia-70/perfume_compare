@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from "react";
-import { Search, Menu, X, Heart, Camera, ChevronRight, ArrowLeft, Sparkles, ExternalLink } from "lucide-react";
+import { Search, Menu, X, Heart, Camera, ChevronRight, ArrowLeft, Sparkles, ExternalLink, LogIn, LogOut } from "lucide-react";
+import { useAuth } from "./hooks/useAuth";
+import { useFavoritos } from "./hooks/useFavoritos";
 
 const SUPABASE_URL    = import.meta.env.VITE_SUPABASE_URL      || "";
 const SUPABASE_KEY    = import.meta.env.VITE_SUPABASE_ANON_KEY  || "";
@@ -392,6 +394,9 @@ function Buscador({ productos, onResultados, onCerrar }) {
   const [query, setQuery]       = useState("");
   const [buscando, setBuscando] = useState(false);
   const fileRef = useRef();
+  const [historial, setHistorial] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("busquedas_recientes") || "[]"); } catch { return []; }
+  });
 
   const buscar = async () => {
     if (!query.trim()) return;
@@ -438,36 +443,76 @@ function Buscador({ productos, onResultados, onCerrar }) {
           </button>
           <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{ display:"none" }} onChange={handleFoto} />
         </div>
-        <p style={{ color:"#2a2a2a", fontSize:"0.75rem", textAlign:"center" }}>Buscá por marca, notas olfativas, ocasión o subí una foto</p>
+        {!query && historial.length > 0 && (
+          <div style={{ marginTop:"8px" }}>
+            <p style={{ color:"#2a2a2a", fontSize:"0.65rem", letterSpacing:"0.1em", textTransform:"uppercase", marginBottom:"8px" }}>Búsquedas recientes</p>
+            <div style={{ display:"flex", flexWrap:"wrap", gap:"6px" }}>
+              {historial.map(h => (
+                <button key={h} onClick={() => setQuery(h)}
+                  style={{ padding:"5px 12px", background:"#111", border:"1px solid #1e1e1e", borderRadius:"20px", color:"#555", cursor:"pointer", fontSize:"0.78rem" }}>
+                  {h}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {!query && historial.length === 0 && (
+          <p style={{ color:"#2a2a2a", fontSize:"0.75rem", textAlign:"center" }}>Buscá por marca, notas olfativas, ocasión o subí una foto</p>
+        )}
       </div>
     </div>
   );
 }
 
 // ─── NAVBAR ─────────────────────────────────────────────────────
-function Navbar({ menuAbierto, setMenuAbierto, setBuscadorOpen, setVista, setGenero, setQuery }) {
+function Navbar({ menuAbierto, setMenuAbierto, setBuscadorOpen, setVista, setGenero, setQuery, user, loginGoogle, logout, favCount }) {
   return (
     <>
-      <nav style={{ position:"fixed", top:0, left:0, right:0, zIndex:100, background:"rgba(8,8,8,0.94)", backdropFilter:"blur(12px)", borderBottom:"1px solid #141414", height:"60px", padding:"0 16px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-        <button onClick={() => setMenuAbierto(m => !m)} style={{ background:"none", border:"none", cursor:"pointer", padding:"8px", color:"#666" }}>
-          {menuAbierto ? <X size={21} color="#c9a84c" /> : <Menu size={21} />}
-        </button>
-        <div style={{ position:"absolute", left:"50%", transform:"translateX(-50%)" }}>
+      <nav style={{ position:"fixed", top:0, left:0, right:0, zIndex:100, background:"rgba(8,8,8,0.94)", backdropFilter:"blur(12px)", borderBottom:"1px solid #141414", height:"60px", padding:"0 16px", display:"flex", alignItems:"center" }}>
+        {/* Izquierda — mismo ancho que la derecha para centrar el título */}
+        <div style={{ flex:"0 0 auto" }}>
+          <button onClick={() => setMenuAbierto(m => !m)} style={{ background:"none", border:"none", cursor:"pointer", padding:"8px", color:"#666" }}>
+            {menuAbierto ? <X size={21} color="#c9a84c" /> : <Menu size={21} />}
+          </button>
+        </div>
+        {/* Centro */}
+        <div style={{ flex:1, textAlign:"center", pointerEvents:"none" }}>
           <span style={{ fontFamily:"'Playfair Display',serif", fontSize:"1.05rem", color:"#fff", letterSpacing:"0.06em" }}>
             perfume<span style={{ color:"#c9a84c" }}>compare</span>
           </span>
         </div>
-        <button onClick={() => setBuscadorOpen(true)} style={{ background:"none", border:"none", cursor:"pointer", padding:"8px", color:"#666" }}>
-          <Search size={20} />
-        </button>
+        {/* Derecha */}
+        <div style={{ flex:"0 0 auto", display:"flex", alignItems:"center", gap:"4px" }}>
+          <button onClick={() => { setVista("favoritos"); setGenero(null); setQuery(null); }} title="Mis favoritos"
+            style={{ background:"none", border:"none", cursor:"pointer", padding:"8px", color: favCount > 0 ? "#e63329" : "#666" }}>
+            <Heart size={20} fill={favCount > 0 ? "#e63329" : "none"} />
+          </button>
+          <button onClick={() => setBuscadorOpen(true)} style={{ background:"none", border:"none", cursor:"pointer", padding:"8px", color:"#666" }}>
+            <Search size={20} />
+          </button>
+          <button onClick={user ? logout : loginGoogle} title={user ? "Cerrar sesión" : "Iniciar sesión con Google"}
+            style={{ background:"none", border:"none", cursor:"pointer", padding:"8px", color: user ? "#c9a84c" : "#444" }}>
+            {user ? <LogOut size={18} /> : <LogIn size={18} />}
+          </button>
+        </div>
       </nav>
 
       <div style={{ position:"fixed", top:"60px", left:0, bottom:0, width:"220px", background:"#080808", borderRight:"1px solid #141414", zIndex:99, transform:menuAbierto?"translateX(0)":"translateX(-100%)", transition:"transform 0.22s ease", overflowY:"auto" }}>
         <div style={{ padding:"24px 0" }}>
+          {user && (
+            <div style={{ padding:"0 20px 16px", borderBottom:"1px solid #141414", marginBottom:"12px" }}>
+              <p style={{ color:"#555", fontSize:"0.72rem", marginBottom:"2px" }}>Sesión iniciada</p>
+              <p style={{ color:"#c9a84c", fontSize:"0.78rem", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{user.email}</p>
+            </div>
+          )}
           <p style={{ color:"#2a2a2a", fontSize:"0.65rem", letterSpacing:"0.12em", textTransform:"uppercase", padding:"0 20px 12px" }}>Secciones</p>
           <button onClick={() => { setVista("ofertas"); setGenero(null); setQuery(null); setMenuAbierto(false); }}
             style={{ width:"100%", padding:"13px 20px", background:"none", border:"none", color:"#ccc", textAlign:"left", cursor:"pointer", fontSize:"0.88rem", fontFamily:"'Playfair Display',serif", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
             Ofertas <ChevronRight size={13} color="#2a2a2a" />
+          </button>
+          <button onClick={() => { setVista("favoritos"); setGenero(null); setQuery(null); setMenuAbierto(false); }}
+            style={{ width:"100%", padding:"13px 20px", background:"none", border:"none", color:"#ccc", textAlign:"left", cursor:"pointer", fontSize:"0.88rem", fontFamily:"'Playfair Display',serif", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+            Mis favoritos <Heart size={13} color="#c9393e" />
           </button>
           <div style={{ height:"1px", background:"#141414", margin:"12px 0" }} />
           <p style={{ color:"#2a2a2a", fontSize:"0.65rem", letterSpacing:"0.12em", textTransform:"uppercase", padding:"0 20px 12px" }}>Catálogo</p>
@@ -492,6 +537,16 @@ function Navbar({ menuAbierto, setMenuAbierto, setBuscadorOpen, setVista, setGen
   );
 }
 
+const LS_HISTORIAL = "busquedas_recientes";
+function guardarBusqueda(q) {
+  if (!q || q.startsWith('"')) return; // no guardar fallbacks de imagen
+  try {
+    const prev = JSON.parse(localStorage.getItem(LS_HISTORIAL) || "[]");
+    const next = [q, ...prev.filter(x => x !== q)].slice(0, 8);
+    localStorage.setItem(LS_HISTORIAL, JSON.stringify(next));
+  } catch {}
+}
+
 // ─── APP ────────────────────────────────────────────────────────
 export default function App() {
   const [todosProductos, setTodosProductos] = useState([]);
@@ -503,8 +558,11 @@ export default function App() {
   const [menuAbierto, setMenuAbierto]       = useState(false);
   const [buscadorOpen, setBuscadorOpen]     = useState(false);
   const [detalle, setDetalle]               = useState(null);
-  const [favoritos, setFavoritos]           = useState(new Set());
   const [orden, setOrden]                   = useState("az");
+
+  const { user, cargando, loginGoogle, logout } = useAuth();
+  const { favIds, toggle: _toggleFav }      = useFavoritos(user);
+  const toggleFav = (perfume) => _toggleFav(perfume.id, perfume.precio_min ?? null);
 
   useEffect(() => {
     if (!SUPABASE_URL) return;
@@ -525,9 +583,10 @@ export default function App() {
     if (vista === "ofertas")           base = base.filter(p => p.tiene_oferta === true);
     if (vista === "tienda_rouge")      base = base.filter(p => p.en_rouge);
     if (vista === "tienda_juleriaque") base = base.filter(p => p.en_juleriaque);
+    if (vista === "favoritos")         base = base.filter(p => (p.variantes||[p]).some(v => favIds.has(v.id)));
     if (genero)                        base = base.filter(p => p.genero === genero);
     setFiltrados(base);
-  }, [vista, genero, productos, queryActual]);
+  }, [vista, genero, productos, queryActual, favIds]);
 
   const onResultados = (res, query) => {
     const agrupados = agruparVariantes(res);
@@ -535,15 +594,7 @@ export default function App() {
     setQueryActual(query);
     setBuscadorOpen(false);
     setDetalle(null);
-  };
-
-  const toggleFav = (perfume) => {
-    setFavoritos(prev => {
-      const next = new Set(prev);
-      if (next.has(perfume.id)) next.delete(perfume.id);
-      else next.add(perfume.id);
-      return next;
-    });
+    guardarBusqueda(query);
   };
 
   const aplicarOrden = (lista) => {
@@ -557,16 +608,53 @@ export default function App() {
 
   const tituloVista = () => {
     if (queryActual) return `"${queryActual}"`;
-    if (vista === "ofertas") return "Ofertas";
+    if (vista === "ofertas")    return "Ofertas";
+    if (vista === "favoritos")  return "Mis favoritos";
     if (vista.startsWith("tienda_")) return TIENDAS[vista.replace("tienda_","")]?.label;
     return genero || "Catálogo completo";
   };
 
+  // Pantalla de inicio — si no hay sesión y ya terminó de cargar
+  if (!user && !cargando) return (
+    <>
+      <GlobalStyles />
+      <div style={{ minHeight:"100vh", background:"#080808", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"24px" }}>
+        {/* Logo */}
+        <div style={{ marginBottom:"48px", textAlign:"center" }}>
+          <p style={{ color:"#c9a84c", fontSize:"0.7rem", letterSpacing:"0.2em", textTransform:"uppercase", marginBottom:"8px" }}>Comparador de precios</p>
+          <h1 style={{ fontFamily:"'Playfair Display',serif", fontSize:"2.2rem", color:"#fff", letterSpacing:"0.04em", margin:0 }}>
+            perfume<span style={{ color:"#c9a84c" }}>compare</span>
+          </h1>
+          <p style={{ color:"#333", fontSize:"0.82rem", marginTop:"12px" }}>Encontrá el mejor precio en Rouge y Juleriaque</p>
+        </div>
+
+        {/* Card de login */}
+        <div style={{ background:"#0f0f0f", border:"1px solid #1a1a1a", borderRadius:"16px", padding:"36px 32px", width:"100%", maxWidth:"340px", display:"flex", flexDirection:"column", alignItems:"center", gap:"16px" }}>
+          <p style={{ color:"#666", fontSize:"0.82rem", textAlign:"center", margin:0 }}>Iniciá sesión para guardar favoritos y acceder al catálogo completo</p>
+
+          <button onClick={loginGoogle}
+            style={{ width:"100%", display:"flex", alignItems:"center", justifyContent:"center", gap:"12px", padding:"12px 16px", background:"#fff", border:"none", borderRadius:"8px", cursor:"pointer", fontSize:"0.88rem", fontWeight:600, color:"#1f1f1f", transition:"opacity 0.15s" }}
+            onMouseOver={e => e.currentTarget.style.opacity="0.9"}
+            onMouseOut={e => e.currentTarget.style.opacity="1"}>
+            {/* Google icon SVG */}
+            <svg width="18" height="18" viewBox="0 0 18 18">
+              <path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z"/>
+              <path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.258c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z"/>
+              <path fill="#FBBC05" d="M3.964 10.707c-.18-.54-.282-1.117-.282-1.707s.102-1.167.282-1.707V4.961H.957C.347 6.173 0 7.548 0 9s.348 2.827.957 4.039l3.007-2.332z"/>
+              <path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.961L3.964 7.293C4.672 5.166 6.656 3.58 9 3.58z"/>
+            </svg>
+            Continuar con Google
+          </button>
+        </div>
+      </div>
+    </>
+  );
+
   if (detalle) return (
     <>
       <GlobalStyles />
-      <Navbar menuAbierto={menuAbierto} setMenuAbierto={setMenuAbierto} setBuscadorOpen={setBuscadorOpen} setVista={setVista} setGenero={setGenero} setQuery={setQueryActual} />
-      <ProductDetail perfume={detalle} favoritos={favoritos} onToggleFav={toggleFav} onBack={() => setDetalle(null)} />
+      <Navbar menuAbierto={menuAbierto} setMenuAbierto={setMenuAbierto} setBuscadorOpen={setBuscadorOpen} setVista={setVista} setGenero={setGenero} setQuery={setQueryActual} user={user} loginGoogle={loginGoogle} logout={logout} favCount={favIds.size} />
+      <ProductDetail perfume={detalle} favoritos={favIds} onToggleFav={toggleFav} onBack={() => setDetalle(null)} />
       {buscadorOpen && <Buscador productos={todosProductos} onResultados={onResultados} onCerrar={() => setBuscadorOpen(false)} />}
       {menuAbierto && <div onClick={() => setMenuAbierto(false)} style={{ position:"fixed", inset:0, zIndex:98 }} />}
     </>
@@ -575,7 +663,7 @@ export default function App() {
   return (
     <>
       <GlobalStyles />
-      <Navbar menuAbierto={menuAbierto} setMenuAbierto={setMenuAbierto} setBuscadorOpen={setBuscadorOpen} setVista={setVista} setGenero={setGenero} setQuery={setQueryActual} />
+      <Navbar menuAbierto={menuAbierto} setMenuAbierto={setMenuAbierto} setBuscadorOpen={setBuscadorOpen} setVista={setVista} setGenero={setGenero} setQuery={setQueryActual} user={user} loginGoogle={loginGoogle} logout={logout} favCount={favIds.size} />
 
       <main style={{ maxWidth:"960px", margin:"0 auto", padding:"72px 16px 48px" }}>
         <div style={{ marginBottom:"20px", paddingTop:"16px", display:"flex", alignItems:"flex-end", justifyContent:"space-between" }}>
@@ -636,7 +724,7 @@ export default function App() {
         ) : (
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(175px, 1fr))", gap:"14px" }}>
             {aplicarOrden(filtrados).map((p, i) => (
-              <ProductCard key={p.id || p.clave_unica || i} perfume={p} favoritos={favoritos} onToggleFav={toggleFav} onClick={() => setDetalle(p)} />
+              <ProductCard key={p.id || p.clave_unica || i} perfume={p} favoritos={favIds} onToggleFav={toggleFav} onClick={() => setDetalle(p)} />
             ))}
           </div>
         )}
