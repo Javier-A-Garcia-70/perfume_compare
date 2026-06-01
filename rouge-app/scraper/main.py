@@ -20,7 +20,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_KEY"))
+client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_KEY"), timeout=60.0)
 
 # Cargados una vez al iniciar — no por request
 _model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
@@ -54,6 +54,8 @@ def claude_proxy(body: ClaudeRequest):
             messages=body.messages,
         )
         return {"content": [{"type": "text", "text": msg.content[0].text}]}
+    except anthropic.APITimeoutError:
+        raise HTTPException(status_code=504, detail="Timeout al conectar con Anthropic. Reintentá en unos segundos.")
     except Exception as e:
         import traceback
         traceback.print_exc()
