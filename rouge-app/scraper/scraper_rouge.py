@@ -114,10 +114,11 @@ def limpiar_html(texto: str) -> str:
 def detectar_genero(categorias: list) -> str:
     rutas = [c.lower() for c in categorias]
     for r in rutas:
-        if any(x in r for x in ["masculin", "hombre", "men", "homme", "para él"]):
-            return "Masculino"
+        # Femenino primero: evita que "femeninas" matchee el substring "men"
         if any(x in r for x in ["femenin", "mujer", "women", "femme", "para ella"]):
             return "Femenino"
+        if any(x in r for x in ["masculin", "hombre", "for men", "homme", "para él"]):
+            return "Masculino"
         if "unisex" in r:
             return "Unisex"
     return "Unisex"
