@@ -132,30 +132,63 @@ async function buscarConIA(query, productos) {
 }
 
 async function buscarPorImagen(base64, productos) {
-  // Solo pedir identificación, sin mandar el catálogo completo
-  const prompt = `Identificá el perfume en esta imagen. Devolvé SOLO un JSON con {"marca": "...", "nombre": "..."}. Sin texto extra.`;
-  // Detectar media_type real desde el prefijo base64
+  const prompt = `Identificá el perfume en esta imagen. Devolvé SOLO un JSON con estos tres campos:
+{"marca": "nombre de la marca", "nombre": "nombre base del perfume SIN el tipo", "tipo": "el tipo exacto que figura en el frasco (Eau de Parfum, Parfum, Elixir, etc.) o null si no se ve"}
+Ejemplo: {"marca": "Dior", "nombre": "Sauvage", "tipo": "Eau de Toilette"}
+Sin texto extra.`;
   let media_type = "image/jpeg";
   if (base64.startsWith("iVBORw"))      media_type = "image/png";
   else if (base64.startsWith("UklGR"))  media_type = "image/webp";
   else if (base64.startsWith("R0lGOD")) media_type = "image/gif";
   try {
-    const res = await fetch(ANTHROPIC_URL, { method:"POST", headers:ANTHROPIC_HEADERS, body: JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:100, messages:[{role:"user", content:[{type:"image",source:{type:"base64",media_type,data:base64}},{type:"text",text:prompt}]}] }) });
+    const res = await fetch(ANTHROPIC_URL, { method:"POST", headers:ANTHROPIC_HEADERS, body: JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:120, messages:[{role:"user", content:[{type:"image",source:{type:"base64",media_type,data:base64}},{type:"text",text:prompt}]}] }) });
     const data = await res.json();
     const info = JSON.parse(data.content?.[0]?.text?.replace(/```json|```/g,"").trim() || "{}");
-    const marca = (info.marca || "").toLowerCase();
+    const marca  = (info.marca  || "").toLowerCase();
     const nombre = (info.nombre || "").toLowerCase();
-    console.log("[imagen] Claude identificó:", info, "| marca:", marca, "| nombre:", nombre);
-    if (!marca && !nombre) return [];
-    // Filtrar localmente: marca exacta + nombre del producto contenido en lo que identificó Claude
-    return productos.filter(p => {
-      const pm = p.marca?.toLowerCase() || "";
-      const pn = p.nombre_base?.toLowerCase() || "";
-      const marcaMatch = marca && pm && pm.includes(marca);
-      const nombreMatch = nombre && pn && nombre.includes(pn);
-      return marcaMatch && nombreMatch;
-    }).slice(0, 5);
-  } catch { return []; }
+    const tipo   = (info.tipo   || "").toLowerCase();
+    console.log("[imagen] Claude identificó:", info);
+    if (!marca && !nombre) return { productos: [], titulo: "búsqueda por imagen" };
+
+    const palabras = nombre.split(/\s+/).filter(Boolean);
+    const nombreMostrado = `${info.marca} ${info.nombre}${info.tipo ? ` ${info.tipo}` : ""}`;
+
+    const exactos = productos
+      .filter(p => {
+        const pm = p.marca?.toLowerCase() || "";
+        const pn = p.nombre_base?.toLowerCase() || "";
+        const pnLimpio = pn.replace(marca, "").trim();
+        const marcaOk  = pm.includes(marca);
+        const nombreOk = pnLimpio.includes(nombre) || nombre.includes(pnLimpio)
+                      || pn.includes(nombre)        || nombre.includes(pn);
+        return marcaOk && nombreOk;
+      })
+      .sort((a, b) => {
+        const tipoA = tipo && (a.tipo?.toLowerCase() || "").includes(tipo) ? 1 : 0;
+        const tipoB = tipo && (b.tipo?.toLowerCase() || "").includes(tipo) ? 1 : 0;
+        if (tipoB !== tipoA) return tipoB - tipoA;
+        const score = n => palabras.filter(w => n.includes(w)).length;
+        return score(b.nombre_base?.toLowerCase() || "") - score(a.nombre_base?.toLowerCase() || "");
+      })
+      .slice(0, 6);
+
+    if (exactos.length > 0)
+      return { productos: exactos, titulo: nombreMostrado };
+
+    // Fallback: misma marca
+    const mismaMarca = productos
+      .filter(p => p.marca?.toLowerCase().includes(marca))
+      .slice(0, 8);
+
+    const tituloFallback = mismaMarca.length > 0
+      ? `"${nombreMostrado}" no encontrado — quizás te interese:`
+      : `"${nombreMostrado}" no encontrado`;
+
+    return { productos: mismaMarca, titulo: tituloFallback };
+  } catch (e) {
+    console.error("[imagen] error:", e);
+    return { productos: [], titulo: "No se pudo identificar la imagen, reintentá" };
+  }
 }
 
 // ─── OFERTA DOTS ────────────────────────────────────────────────
@@ -375,8 +408,8 @@ function Buscador({ productos, onResultados, onCerrar }) {
     reader.onload = async (ev) => {
       setBuscando(true);
       const base64 = ev.target.result.split(",")[1];
-      const res = await buscarPorImagen(base64, productos);
-      onResultados(res.length ? res : [], "búsqueda por imagen");
+      const { productos: res, titulo } = await buscarPorImagen(base64, productos);
+      onResultados(res, titulo);
       setBuscando(false);
     };
     reader.readAsDataURL(file);
@@ -471,6 +504,7 @@ export default function App() {
   const [buscadorOpen, setBuscadorOpen]     = useState(false);
   const [detalle, setDetalle]               = useState(null);
   const [favoritos, setFavoritos]           = useState(new Set());
+  const [orden, setOrden]                   = useState("az");
 
   useEffect(() => {
     if (!SUPABASE_URL) return;
@@ -496,11 +530,11 @@ export default function App() {
   }, [vista, genero, productos, queryActual]);
 
   const onResultados = (res, query) => {
-    // Agrupar también los resultados de búsqueda
     const agrupados = agruparVariantes(res);
     setFiltrados(agrupados);
     setQueryActual(query);
     setBuscadorOpen(false);
+    setDetalle(null);
   };
 
   const toggleFav = (perfume) => {
@@ -510,6 +544,15 @@ export default function App() {
       else next.add(perfume.id);
       return next;
     });
+  };
+
+  const aplicarOrden = (lista) => {
+    const copia = [...lista];
+    if (orden === "az")          return copia.sort((a,b) => (a.marca||"").localeCompare(b.marca||"") || (a.nombre_base||"").localeCompare(b.nombre_base||""));
+    if (orden === "za")          return copia.sort((a,b) => (b.marca||"").localeCompare(a.marca||"") || (b.nombre_base||"").localeCompare(a.nombre_base||""));
+    if (orden === "precio_asc")  return copia.sort((a,b) => (a.precio_min||Infinity) - (b.precio_min||Infinity));
+    if (orden === "precio_desc") return copia.sort((a,b) => (b.precio_min||0) - (a.precio_min||0));
+    return copia;
   };
 
   const tituloVista = () => {
@@ -560,14 +603,29 @@ export default function App() {
           </div>
         )}
 
-        <div style={{ display:"flex", gap:"12px", marginBottom:"20px" }}>
-          {Object.entries(TIENDAS).map(([k,t]) => (
-            <div key={k} style={{ display:"flex", alignItems:"center", gap:"5px" }}>
-              <div style={{ width:"7px", height:"7px", borderRadius:"50%", background:t.color }} />
-              <span style={{ color:"#333", fontSize:"0.7rem" }}>{t.label}</span>
-            </div>
-          ))}
-          <span style={{ color:"#2a2a2a", fontSize:"0.7rem" }}>· {filtrados.length} perfumes</span>
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:"20px", flexWrap:"wrap", gap:"10px" }}>
+          <div style={{ display:"flex", gap:"12px", alignItems:"center" }}>
+            {Object.entries(TIENDAS).map(([k,t]) => (
+              <div key={k} style={{ display:"flex", alignItems:"center", gap:"5px" }}>
+                <div style={{ width:"7px", height:"7px", borderRadius:"50%", background:t.color }} />
+                <span style={{ color:"#333", fontSize:"0.7rem" }}>{t.label}</span>
+              </div>
+            ))}
+            <span style={{ color:"#2a2a2a", fontSize:"0.7rem" }}>· {filtrados.length} perfumes</span>
+          </div>
+          <div style={{ display:"flex", gap:"4px" }}>
+            {[
+              { id:"az",          label:"A-Z" },
+              { id:"za",          label:"Z-A" },
+              { id:"precio_asc",  label:"$ ↑" },
+              { id:"precio_desc", label:"$ ↓" },
+            ].map(o => (
+              <button key={o.id} onClick={() => setOrden(o.id)}
+                style={{ padding:"4px 10px", borderRadius:"16px", border:`1px solid ${orden===o.id?"#c9a84c":"#1e1e1e"}`, background:orden===o.id?"rgba(201,168,76,0.08)":"transparent", color:orden===o.id?"#c9a84c":"#444", cursor:"pointer", fontSize:"0.72rem", fontWeight:orden===o.id?700:400, transition:"all 0.15s" }}>
+                {o.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         {filtrados.length === 0 ? (
@@ -577,7 +635,7 @@ export default function App() {
           </div>
         ) : (
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(175px, 1fr))", gap:"14px" }}>
-            {filtrados.map((p, i) => (
+            {aplicarOrden(filtrados).map((p, i) => (
               <ProductCard key={p.id || p.clave_unica || i} perfume={p} favoritos={favoritos} onToggleFav={toggleFav} onClick={() => setDetalle(p)} />
             ))}
           </div>
