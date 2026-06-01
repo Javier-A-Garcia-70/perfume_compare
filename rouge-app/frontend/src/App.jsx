@@ -73,23 +73,34 @@ async function buscarConIA(query, productos) {
       .map(v => v.id)
   );
 
-  console.log("[buscar] query:", q, "| palabras:", palabras, "| textMatches:", textMatches.size);
-  if (textMatches.size > 0) {
-    const ejemplo = productos.flatMap(p => p.variantes || [p]).find(v => textMatches.has(v.id));
-    console.log("[buscar] ejemplo match:", ejemplo?.marca, ejemplo?.nombre_base, "id:", ejemplo?.id);
-  } else {
-    const primero = productos[0];
-    console.log("[buscar] primer producto:", primero?.marca, primero?.nombre_base, "variantes:", primero?.variantes?.length, "id:", primero?.id, "v[0].id:", primero?.variantes?.[0]?.id);
-  }
+  // Detectar género en la query para usarlo como filtro SQL
+  let filtroGenero = "";
+  if (/\b(masculin\w*|hombre|para hombre|caballero)\b/i.test(query)) filtroGenero = "Masculino";
+  else if (/\b(femenin\w*|mujer|para mujer|dama)\b/i.test(query))     filtroGenero = "Femenino";
 
   try {
     const res = await fetch("http://localhost:8001/api/search", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query, limit: 100 }),
+      body: JSON.stringify({ query, limit: 100, filtro_genero: filtroGenero }),
     });
     const data = await res.json();
     const porSimilitud = Object.fromEntries((data.results || []).map(r => [r.id, r.similarity]));
+
+    // Log: qué modo se usa y top resultados vectoriales
+    const idAProducto = Object.fromEntries(
+      productos.flatMap(p => (p.variantes || [p])).map(v => [v.id, `${v.marca} ${v.nombre_base}`])
+    );
+    console.group(`[búsqueda] "${query}"`);
+    console.log("modo:", textMatches.size > 0 ? `texto exacto (${textMatches.size} matches)` : "vectorial semántico");
+    if (filtroGenero) console.log("filtro género:", filtroGenero);
+    if (textMatches.size === 0) {
+      console.log("top vectorial:");
+      (data.results || []).slice(0, 10).forEach(r =>
+        console.log(`  ${r.similarity?.toFixed(3)}  ${idAProducto[r.id] || r.id}`)
+      );
+    }
+    console.groupEnd();
 
     // Si hay matches de texto, usamos solo esos (búsqueda por nombre/marca)
     // Si no hay texto, usamos los vectoriales (búsqueda semántica)
@@ -101,7 +112,6 @@ async function buscarConIA(query, productos) {
       .filter(p => (p.variantes || [p]).some(v => todosIds.has(v.id)))
       .sort((a, b) => {
         const vars = vs => (vs.variantes || [vs]).map(v => v.id);
-        // Texto exacto primero, luego por similitud vectorial
         const aTexto = vars(a).some(id => textMatches.has(id)) ? 1 : 0;
         const bTexto = vars(b).some(id => textMatches.has(id)) ? 1 : 0;
         if (bTexto !== aTexto) return bTexto - aTexto;

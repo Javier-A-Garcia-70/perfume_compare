@@ -68,10 +68,40 @@ class SearchRequest(BaseModel):
     solo_ofertas: bool = False
 
 
+def expandir_query(query: str) -> str:
+    """Usa Claude para traducir la query a vocabulario de perfumería."""
+    try:
+        msg = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=80,
+            messages=[{
+                "role": "user",
+                "content": (
+                    f"Sos un experto en perfumería. Dada esta búsqueda: \"{query}\"\n"
+                    "Devolvé SOLO una lista de 8-12 palabras clave de perfumería en español "
+                    "(notas olfativas, familias, descriptores) que representen esa búsqueda. "
+                    "Sin explicaciones, solo las palabras separadas por espacios."
+                )
+            }]
+        )
+        expandido = msg.content[0].text.strip()
+        return expandido
+    except Exception:
+        return query
+
+
 @app.post("/api/search")
 def vector_search(body: SearchRequest):
     try:
-        embedding = _model.encode(body.query).tolist()
+        print(f"\n{'='*50}")
+        print(f"[search] query original: '{body.query}'")
+
+        query_embedding = expandir_query(body.query)
+        print(f"[search] query expandida: '{query_embedding}'")
+
+        embedding = _model.encode(query_embedding).tolist()
+        print(f"[search] embedding generado ({len(embedding)} dims)")
+
         results = supabase_rpc("buscar_perfumes", {
             "query_embedding": embedding,
             "match_count": body.limit,
@@ -79,7 +109,12 @@ def vector_search(body: SearchRequest):
             "filtro_marca": body.filtro_marca,
             "solo_ofertas": body.solo_ofertas,
         })
-        return {"results": results}
+
+        print(f"[search] resultados: {len(results)}")
+        for r in results[:10]:
+            print(f"  id={r.get('id')}  sim={r.get('similarity', 0):.3f}")
+
+        return {"results": results, "query": body.query, "total": len(results)}
     except Exception as e:
         import traceback
         traceback.print_exc()
