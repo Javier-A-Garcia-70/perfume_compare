@@ -6,8 +6,9 @@ import { useFavoritos } from "./hooks/useFavoritos";
 const SUPABASE_URL    = import.meta.env.VITE_SUPABASE_URL      || "";
 const SUPABASE_KEY    = import.meta.env.VITE_SUPABASE_ANON_KEY  || "";
 
-// Backend FastAPI en local (puerto 8000) — la key nunca llega al browser
-const ANTHROPIC_URL     = "http://localhost:8001/api/claude";
+// Backend FastAPI — la key nunca llega al browser
+const BACKEND_URL       = import.meta.env.VITE_BACKEND_URL || "http://localhost:8001";
+const ANTHROPIC_URL     = `${BACKEND_URL}/api/claude`;
 const ANTHROPIC_HEADERS = { "Content-Type": "application/json" };
 
 const TIENDAS = {
@@ -81,7 +82,7 @@ async function buscarConIA(query, productos) {
   else if (/\b(femenin\w*|mujer|para mujer|dama)\b/i.test(query))     filtroGenero = "Femenino";
 
   try {
-    const res = await fetch("http://localhost:8001/api/search", {
+    const res = await fetch(`${BACKEND_URL}/api/search`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query, limit: 100, filtro_genero: filtroGenero }),
