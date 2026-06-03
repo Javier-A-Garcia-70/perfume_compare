@@ -110,7 +110,7 @@ cd rouge-app/scraper
 uvicorn main:app --port 8001
 ```
 
-> **Importante:** el puerto 8000 está ocupado permanentemente por Docker (PID 6256). Siempre usar 8001.
+> **Importante:** el puerto 8000 puede estár ocupado permanentemente por Docker (PID 6256). usar 8001.
 
 El servidor queda en `http://localhost:8001`.
 Rutas disponibles:
@@ -270,6 +270,26 @@ El frontend agrupa los SKUs por `marca||nombre_base||tipo` en `agruparVariantes(
 - ⚠️ `buscarPorImagen` puede retornar vacío si Claude devuelve nombre con variaciones — revisar `console.log("[imagen] Claude identificó:", info)` en DevTools
 - ⚠️ `buscarConIA` con 5000+ SKUs puede tocar rate limit de Anthropic (30k tokens/min) — actualmente usa `/api/search` (vector), no envía catálogo completo a Claude
 - ⏳ Producción no desplegada aún
+
+---
+
+## Configuración de Google OAuth
+
+Para que el login con Google funcione se deben configurar dos servicios:
+
+### Google Cloud Console
+1. Crear credenciales OAuth 2.0 (tipo: Aplicación web)
+2. En **Orígenes autorizados de JavaScript** agregar: `https://<tu-proyecto-id>.supabase.co`
+3. En **URIs de redireccionamiento autorizados** agregar: `https://<tu-proyecto-id>.supabase.co/auth/v1/callback`
+4. Copiar el **Client ID** y **Client Secret**
+
+### Supabase
+1. Ir a **Authentication → Providers → Google**
+2. Activar el toggle **Enable**
+3. Pegar el Client ID y Client Secret
+4. Guardar
+
+Sin estos pasos, cualquier llamada a `signInWithOAuth({ provider: "google" })` devuelve `{"code":400,"error_code":"validation_failed","msg":"Unsupported provider: provider is not enabled"}`.
 
 ---
 
