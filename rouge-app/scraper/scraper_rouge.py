@@ -4,6 +4,7 @@ Rouge + Juleriaque → deduplicación → Supabase
 
 Correr con: python scraper_comparador.py
 """
+
 import requests
 import json
 import re

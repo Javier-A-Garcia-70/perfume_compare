@@ -99,6 +99,64 @@ La app queda disponible en `http://localhost:5173`.
 
 ---
 
+### 5. Configurar autenticación con Google OAuth
+
+Para que el login con Google funcione hay que configurar dos servicios: **Google Cloud Console** y **Supabase**. Seguir los pasos en orden.
+
+#### 5.1 Crear credenciales en Google Cloud Console
+
+1. Ir a [console.cloud.google.com](https://console.cloud.google.com)
+2. Crear un proyecto nuevo (o seleccionar uno existente)
+3. En el menú lateral ir a **APIs y servicios → Pantalla de consentimiento de OAuth**
+   - Tipo de usuario: **Externo**
+   - Completar nombre de la app, correo de soporte y correo del desarrollador
+   - Guardar y continuar (el resto de los pasos se pueden dejar vacíos)
+4. En el menú lateral ir a **APIs y servicios → Credenciales**
+5. Click en **+ Crear credenciales → ID de cliente de OAuth 2.0**
+6. Tipo de aplicación: **Aplicación web**
+7. En **Orígenes autorizados de JavaScript** agregar:
+   ```
+   https://<tu-proyecto-id>.supabase.co
+   ```
+8. En **URIs de redireccionamiento autorizados** agregar:
+   ```
+   https://<tu-proyecto-id>.supabase.co/auth/v1/callback
+   ```
+   > El `<tu-proyecto-id>` se encuentra en Supabase → Settings → API → Project URL
+9. Click en **Crear**
+10. Copiar el **ID de cliente** y el **Secreto de cliente** que aparecen en el popup
+
+#### 5.2 Habilitar Google como proveedor en Supabase
+
+1. Ir a [supabase.com](https://supabase.com) → tu proyecto
+2. En el menú lateral ir a **Authentication → Providers**
+3. Buscar **Google** y hacer click para expandirlo
+4. Activar el toggle **Enable**
+5. Pegar el **Client ID** y el **Client Secret** copiados del paso anterior
+6. Click en **Save**
+
+Una vez completados estos pasos el botón "Iniciar sesión con Google" de la app funcionará correctamente.
+
+---
+
+### 6. Levantar el backend si tenés una API key de Anthropic
+
+Si agregás una `ANTHROPIC_KEY` en `rouge-app/scraper/.env`, el backend FastAPI es necesario para que funcionen la búsqueda semántica y el reconocimiento de imágenes.
+
+```bash
+cd rouge-app/scraper
+venv\Scripts\Activate.ps1        # Windows PowerShell
+# source venv/bin/activate        # Mac/Linux
+
+uvicorn main:app --port 8001
+```
+
+> Levantar en el puerto que corresponda según tu configuración local. Por defecto este proyecto usa **8001** porque el puerto 8000 puede estar ocupado (por ejemplo, por Docker). Verificar que la URL en el frontend apunte al puerto correcto.
+
+El servidor queda disponible en `http://localhost:8001`. Sin él, la búsqueda por texto e imagen no funcionan.
+
+---
+
 ## Variables de entorno
 
 | Archivo | Variable | Descripción |
