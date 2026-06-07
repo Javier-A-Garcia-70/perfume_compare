@@ -615,41 +615,41 @@ export default function App() {
     return genero || "Catálogo completo";
   };
 
-  // Pantalla de inicio — si no hay sesión y ya terminó de cargar
-  if (!user && !cargando) return (
-    <>
-      <GlobalStyles />
-      <div style={{ minHeight:"100vh", background:"#080808", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"24px" }}>
-        {/* Logo */}
-        <div style={{ marginBottom:"48px", textAlign:"center" }}>
-          <p style={{ color:"#c9a84c", fontSize:"0.7rem", letterSpacing:"0.2em", textTransform:"uppercase", marginBottom:"8px" }}>Comparador de precios</p>
-          <h1 style={{ fontFamily:"'Playfair Display',serif", fontSize:"2.2rem", color:"#fff", letterSpacing:"0.04em", margin:0 }}>
-            perfume<span style={{ color:"#c9a84c" }}>compare</span>
-          </h1>
-          <p style={{ color:"#333", fontSize:"0.82rem", marginTop:"12px" }}>Encontrá el mejor precio en Rouge y Juleriaque</p>
-        </div>
+  // // Pantalla de inicio — si no hay sesión y ya terminó de cargar
+  // if (!user && !cargando) return (
+  //   <>
+  //     <GlobalStyles />
+  //     <div style={{ minHeight:"100vh", background:"#080808", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"24px" }}>
+  //       {/* Logo */}
+  //       <div style={{ marginBottom:"48px", textAlign:"center" }}>
+  //         <p style={{ color:"#c9a84c", fontSize:"0.7rem", letterSpacing:"0.2em", textTransform:"uppercase", marginBottom:"8px" }}>Comparador de precios</p>
+  //         <h1 style={{ fontFamily:"'Playfair Display',serif", fontSize:"2.2rem", color:"#fff", letterSpacing:"0.04em", margin:0 }}>
+  //           perfume<span style={{ color:"#c9a84c" }}>compare</span>
+  //         </h1>
+  //         <p style={{ color:"#333", fontSize:"0.82rem", marginTop:"12px" }}>Encontrá el mejor precio en Rouge y Juleriaque</p>
+  //       </div>
 
-        {/* Card de login */}
-        <div style={{ background:"#0f0f0f", border:"1px solid #1a1a1a", borderRadius:"16px", padding:"36px 32px", width:"100%", maxWidth:"340px", display:"flex", flexDirection:"column", alignItems:"center", gap:"16px" }}>
-          <p style={{ color:"#666", fontSize:"0.82rem", textAlign:"center", margin:0 }}>Iniciá sesión para guardar favoritos y acceder al catálogo completo</p>
+  //       {/* Card de login */}
+  //       <div style={{ background:"#0f0f0f", border:"1px solid #1a1a1a", borderRadius:"16px", padding:"36px 32px", width:"100%", maxWidth:"340px", display:"flex", flexDirection:"column", alignItems:"center", gap:"16px" }}>
+  //         <p style={{ color:"#666", fontSize:"0.82rem", textAlign:"center", margin:0 }}>Iniciá sesión para guardar favoritos y acceder al catálogo completo</p>
 
-          <button onClick={loginGoogle}
-            style={{ width:"100%", display:"flex", alignItems:"center", justifyContent:"center", gap:"12px", padding:"12px 16px", background:"#fff", border:"none", borderRadius:"8px", cursor:"pointer", fontSize:"0.88rem", fontWeight:600, color:"#1f1f1f", transition:"opacity 0.15s" }}
-            onMouseOver={e => e.currentTarget.style.opacity="0.9"}
-            onMouseOut={e => e.currentTarget.style.opacity="1"}>
-            {/* Google icon SVG */}
-            <svg width="18" height="18" viewBox="0 0 18 18">
-              <path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z"/>
-              <path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.258c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z"/>
-              <path fill="#FBBC05" d="M3.964 10.707c-.18-.54-.282-1.117-.282-1.707s.102-1.167.282-1.707V4.961H.957C.347 6.173 0 7.548 0 9s.348 2.827.957 4.039l3.007-2.332z"/>
-              <path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.961L3.964 7.293C4.672 5.166 6.656 3.58 9 3.58z"/>
-            </svg>
-            Continuar con Google
-          </button>
-        </div>
-      </div>
-    </>
-  );
+  //         <button onClick={loginGoogle}
+  //           style={{ width:"100%", display:"flex", alignItems:"center", justifyContent:"center", gap:"12px", padding:"12px 16px", background:"#fff", border:"none", borderRadius:"8px", cursor:"pointer", fontSize:"0.88rem", fontWeight:600, color:"#1f1f1f", transition:"opacity 0.15s" }}
+  //           onMouseOver={e => e.currentTarget.style.opacity="0.9"}
+  //           onMouseOut={e => e.currentTarget.style.opacity="1"}>
+  //           {/* Google icon SVG */}
+  //           <svg width="18" height="18" viewBox="0 0 18 18">
+  //             <path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z"/>
+  //             <path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.258c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z"/>
+  //             <path fill="#FBBC05" d="M3.964 10.707c-.18-.54-.282-1.117-.282-1.707s.102-1.167.282-1.707V4.961H.957C.347 6.173 0 7.548 0 9s.348 2.827.957 4.039l3.007-2.332z"/>
+  //             <path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.961L3.964 7.293C4.672 5.166 6.656 3.58 9 3.58z"/>
+  //           </svg>
+  //           Continuar con Google
+  //         </button>
+  //       </div>
+  //     </div>
+  //   </>
+  // );
 
   if (detalle) return (
     <>
