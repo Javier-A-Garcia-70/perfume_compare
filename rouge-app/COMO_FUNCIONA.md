@@ -110,22 +110,24 @@ La API de Anthropic requiere una **API key** (clave secreta). Si el frontend la 
 |---|---|---|
 | **Frontend React** | Vercel | Gratis |
 | **Backend FastAPI** | DigitalOcean App Platform | ~$24/mes |
-| **Scraper** (cron semanal) | DigitalOcean Functions | ~$0 |
+| **Scraper** (cron cada 5 días) | DigitalOcean (pendiente) | ~$0–24/mes |
 | **Base de datos + vectores** | Supabase | Gratis (tier gratuito) |
 
 ### Backend FastAPI — DigitalOcean App Platform
 
 App Platform detecta el repositorio de GitHub, instala las dependencias del `requirements.txt` y corre el servidor automáticamente. No hay que administrar ningún servidor. Cada push al repositorio hace un nuevo deploy.
 
-### Scraper — DigitalOcean Functions (cron cada 5 días)
+### Scraper — DigitalOcean (infraestructura pendiente, cron cada 5 días)
 
-Una Function serverless que se activa cada 5 días. Solo existe mientras corre (minutos), luego se apaga. Se le configura un trigger de tipo cron:
+Ejecutable (actualmente sin deployar) que se activará cada 5 días vía cron. Se le configura un trigger de tipo cron:
 ```
 0 3 */5 * *   # cada 5 días a las 3am UTC
 ```
 Llama a la API de VTEX, actualiza precios y regenera embeddings en Supabase.
 
 > **Nota:** La ejecución cada 5 días (en lugar de semanal) asegura que Supabase NO pausé automáticamente la base de datos por inactividad (que ocurre después de 7 días sin actividad en tier gratuito).
+>
+> **Infraestructura pendiente:** Ver [ADR-007](./ADR.md#adr-007--infraestructura-de-cómputo-para-backend-y-scraper-propuesto) para evaluar entre App Platform, Droplet o Functions.
 
 ### Flujo completo en producción
 
