@@ -18,3 +18,7 @@ rouge-app/frontend/.env
 # Editor / OS
 .vscode/
 *.DS_Store
+
+# md
+ADR.md
+PRD.md

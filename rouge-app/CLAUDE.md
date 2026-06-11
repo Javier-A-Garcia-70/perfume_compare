@@ -8,7 +8,7 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  scraper_rouge.py  (Python, cron semanal)                   │
+│  scraper_rouge.py  (Python, cron cada 5 días)              │
 │  └─ VTEX API → deduplicar → embeddings → upsert Supabase   │
 └────────────────────────┬────────────────────────────────────┘
                          │ PostgreSQL + pgvector
@@ -78,7 +78,7 @@ rouge-app/
 
 | Capa | Tecnología |
 |---|---|
-| Scraper | Python 3.11+, `requests`, `sentence-transformers`, `supabase-py` |
+| Scraper (cron cada 5 días) | Python 3.11+, `requests`, `sentence-transformers`, `supabase-py` |
 | Backend proxy | FastAPI + uvicorn, `anthropic`, `sentence-transformers` |
 | Embeddings | `paraphrase-multilingual-MiniLM-L12-v2` (384 dims, multilingüe) |
 | AI / LLM | Claude `claude-sonnet-4-20250514` (imagen + proxy texto); `claude-haiku-4-5-20251001` (expansión de query) |
@@ -256,7 +256,7 @@ El frontend agrupa los SKUs por `marca||nombre_base||tipo` en `agruparVariantes(
 |---|---|---|
 | Frontend React | **Vercel** | `npm run build` → `dist/`. Variables VITE_* en Vercel dashboard. |
 | Backend FastAPI | **DigitalOcean App Platform** | ~$24/mes. Actualizar `ANTHROPIC_URL` en App.jsx al URL del App Platform. Agregar dominio Vercel a `CORS_ORIGINS`. |
-| Scraper semanal | **DigitalOcean Functions** | ~$0 (serverless). Env vars: `SUPABASE_URL`, `SUPABASE_KEY`. |
+| Scraper (cada 5 días) | **DigitalOcean Functions** | ~$0 (serverless). Env vars: `SUPABASE_URL`, `SUPABASE_KEY`. Ejecuta cada 5 días (`0 3 */5 * *`) para evitar que Supabase pausé la base de datos por inactividad. |
 | Base de datos | **Supabase** | Free tier suficiente para catálogo de ~5000 SKUs. |
 
 ---
