@@ -117,13 +117,15 @@ La API de Anthropic requiere una **API key** (clave secreta). Si el frontend la 
 
 App Platform detecta el repositorio de GitHub, instala las dependencias del `requirements.txt` y corre el servidor automáticamente. No hay que administrar ningún servidor. Cada push al repositorio hace un nuevo deploy.
 
-### Scraper — DigitalOcean Functions (cron semanal)
+### Scraper — DigitalOcean Functions (cron cada 5 días)
 
-Una Function serverless que se activa una vez por semana. Solo existe mientras corre (minutos), luego se apaga. Se le configura un trigger de tipo cron:
+Una Function serverless que se activa cada 5 días. Solo existe mientras corre (minutos), luego se apaga. Se le configura un trigger de tipo cron:
 ```
-0 3 * * 0   # cada domingo a las 3am UTC
+0 3 */5 * *   # cada 5 días a las 3am UTC
 ```
 Llama a la API de VTEX, actualiza precios y regenera embeddings en Supabase.
+
+> **Nota:** La ejecución cada 5 días (en lugar de semanal) asegura que Supabase NO pausé automáticamente la base de datos por inactividad (que ocurre después de 7 días sin actividad en tier gratuito).
 
 ### Flujo completo en producción
 
@@ -136,7 +138,7 @@ Llama a la API de VTEX, actualiza precios y regenera embeddings en Supabase.
         ▼                       ▼
 [Supabase - PostgreSQL]    [Anthropic API]
         ▲
-        │ actualiza precios/embeddings (cada domingo)
+        │ actualiza precios/embeddings (cada 5 días)
 [DO Functions - Scraper cron]
 ```
 
