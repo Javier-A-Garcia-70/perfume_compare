@@ -8,7 +8,7 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  scraper_rouge.py  (Python, cron cada 5 días)              │
+│  scraper_rouge.py  (Python, cron cada 5 días, sin deployar)│
 │  └─ VTEX API → deduplicar → embeddings → upsert Supabase   │
 └────────────────────────┬────────────────────────────────────┘
                          │ PostgreSQL + pgvector
@@ -256,7 +256,7 @@ El frontend agrupa los SKUs por `marca||nombre_base||tipo` en `agruparVariantes(
 |---|---|---|
 | Frontend React | **Vercel** | `npm run build` → `dist/`. Variables VITE_* en Vercel dashboard. |
 | Backend FastAPI | **DigitalOcean App Platform** | ~$24/mes. Actualizar `ANTHROPIC_URL` en App.jsx al URL del App Platform. Agregar dominio Vercel a `CORS_ORIGINS`. |
-| Scraper (cada 5 días) | **DigitalOcean Functions** | ~$0 (serverless). Env vars: `SUPABASE_URL`, `SUPABASE_KEY`. Ejecuta cada 5 días (`0 3 */5 * *`) para evitar que Supabase pausé la base de datos por inactividad. |
+| Scraper (cada 5 días) | **DigitalOcean** (pendiente) | Infraestructura no definida aún (ver ADR-007: App Platform, Droplet o Functions). Env vars: `SUPABASE_URL`, `SUPABASE_KEY`. Cron: `0 3 */5 * *` (cada 5 días a las 3am UTC) para evitar que Supabase pausé la DB por inactividad. |
 | Base de datos | **Supabase** | Free tier suficiente para catálogo de ~5000 SKUs. |
 
 ---
