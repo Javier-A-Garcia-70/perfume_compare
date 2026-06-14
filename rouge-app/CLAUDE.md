@@ -173,6 +173,7 @@ Schema en `rouge-app/scraper/schema_rouge.sql`. Ejecutar completo en Supabase SQ
 - **`precio_historial`** — registro histórico de precios para detectar bajadas.
 - **`favoritos`** — favoritos por usuario (`user_id` referencia `auth.users`), incluye `seguimiento_semanas`.
 - **`push_suscripciones`** — endpoints Web Push por usuario.
+- **`heartbeat`** — tabla keep-alive para evitar pausa de Supabase free tier (cron inserta una fila 2x por semana).
 
 ### Vista
 
@@ -257,6 +258,7 @@ El frontend agrupa los SKUs por `marca||nombre_base||tipo` en `agruparVariantes(
 | Frontend React | **Vercel** | `npm run build` → `dist/`. Variables VITE_* en Vercel dashboard. |
 | Backend FastAPI | **DigitalOcean App Platform** | ~$24/mes. Actualizar `ANTHROPIC_URL` en App.jsx al URL del App Platform. Agregar dominio Vercel a `CORS_ORIGINS`. |
 | Scraper (cada 5 días) | **DigitalOcean** (pendiente) | Infraestructura no definida aún (ver ADR-007: App Platform, Droplet o Functions). Env vars: `SUPABASE_URL`, `SUPABASE_KEY`. Cron: `0 3 */5 * *` (cada 5 días a las 3am UTC) para evitar que Supabase pausé la DB por inactividad. |
+| Keep-Alive Supabase | **GitHub Actions** | Workflow `.github/workflows/supabase-keepalive.yml` inserta fila en tabla `heartbeat` cada lunes y viernes 9 AM UTC. Previene pausa automática de free tier por inactividad (7 días). Usa secrets: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`. |
 | Base de datos | **Supabase** | Free tier suficiente para catálogo de ~5000 SKUs. |
 
 ---

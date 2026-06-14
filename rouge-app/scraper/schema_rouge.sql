@@ -170,3 +170,20 @@ begin
   limit match_count;
 end;
 $$ language plpgsql;
+
+-- TABLA HEARTBEAT: Keep-Alive para evitar pausa de Supabase free tier
+create table if not exists heartbeat (
+  id bigserial primary key,
+  last_ping timestamptz default now()
+);
+
+alter table heartbeat enable row level security;
+
+drop policy if exists "heartbeat_insert_public" on heartbeat;
+drop policy if exists "heartbeat_select_public" on heartbeat;
+
+create policy "heartbeat_insert_public" on heartbeat
+  for insert with check (true);
+
+create policy "heartbeat_select_public" on heartbeat
+  for select using (true);

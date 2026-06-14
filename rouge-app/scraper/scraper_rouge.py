@@ -22,8 +22,10 @@ SUPABASE_KEY = os.environ["SUPABASE_KEY"]
 MODEL_NAME   = "paraphrase-multilingual-MiniLM-L12-v2"
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Accept": "application/json",
+    "Accept-Language": "es-AR,es;q=0.9",
+    "Cache-Control": "no-cache",
 }
 
 TIENDAS = {
@@ -131,20 +133,49 @@ def scrape_tienda(nombre_tienda: str) -> list:
     base   = cfg["base_link"]
     desde, paso = 0, 50
     items  = []
+    max_retries = 3
+    delay = 0.5 if nombre_tienda == "rouge" else 1.0  # Juleriaque más lento
 
     print(f"\nScrapeando {nombre_tienda}...")
+    errores_consecutivos = 0
+
     while True:
         endpoint = f"{url}?_from={desde}&_to={desde+paso-1}"
-        print(f"  {desde}–{desde+paso-1}...")
-        try:
-            r = requests.get(endpoint, headers=HEADERS, timeout=15)
-            r.raise_for_status()
-            data = r.json()
-        except Exception as e:
-            print(f"  Error: {e}")
-            break
+        print(f"  {desde}–{desde+paso-1}...", end=" ", flush=True)
+
+        data = None
+        for intento in range(max_retries):
+            try:
+                r = requests.get(endpoint, headers=HEADERS, timeout=20)
+                r.raise_for_status()
+                data = r.json()
+                errores_consecutivos = 0
+                print("✓")
+                break
+            except requests.exceptions.HTTPError as e:
+                if e.response.status_code in [429, 500, 502, 503]:  # Rate limit o servidor
+                    espera = 2 ** intento  # Backoff exponencial: 1s, 2s, 4s
+                    print(f"HTTP {e.response.status_code} (reintentando en {espera}s)...", end=" ", flush=True)
+                    time.sleep(espera)
+                else:
+                    print(f"Error HTTP {e.response.status_code}")
+                    errores_consecutivos += 1
+                    break
+            except Exception as e:
+                print(f"Error: {type(e).__name__}: {e}")
+                errores_consecutivos += 1
+                break
+
+        if data is None:
+            if errores_consecutivos >= 2:
+                print(f"  Demasiados errores consecutivos. Deteniendo.")
+                break
+            desde += paso
+            time.sleep(delay)
+            continue
 
         if not data:
+            print("  (vacío)")
             break
 
         for prod in data:
@@ -204,7 +235,7 @@ def scrape_tienda(nombre_tienda: str) -> list:
                 })
 
         desde += paso
-        time.sleep(0.4)
+        time.sleep(delay)
 
     print(f"  Total {nombre_tienda}: {len(items)} variantes")
     return items

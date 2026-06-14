@@ -233,6 +233,36 @@ Hace upsert — no duplica, actualiza precios existentes y agrega productos nuev
 
 ---
 
+## Mantenimiento: Keep-Alive de Supabase
+
+Supabase en plan free tier **pausa automáticamente** la base de datos si hay más de 7 días sin actividad real (queries, no solo visitas).
+
+**Solución:** GitHub Actions hace un INSERT en la tabla `heartbeat` cada lunes y viernes 9 AM UTC.
+
+### Cómo funciona
+
+1. Workflow automático en `.github/workflows/supabase-keepalive.yml`
+2. Cron: `0 9 * * 1,5` (lunes y viernes)
+3. Usa `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY` (secrets en GitHub)
+4. Inserta una fila en tabla `heartbeat` (sin datos sensibles)
+
+### Para probar manualmente
+
+GitHub → **Actions** → **"Supabase Keep-Alive"** → **"Run workflow"**
+
+Los logs mostrarán `Status: 201` si la inserción fue exitosa.
+
+### Secrets requeridos en GitHub
+
+1. Ir a **Settings → Secrets and variables → Actions**
+2. Agregar secrets:
+   - `VITE_SUPABASE_URL` → URL del proyecto
+   - `VITE_SUPABASE_ANON_KEY` → Anon key
+
+Ver `.github/workflows/supabase-keepalive.yml` para detalles.
+
+---
+
 ## Stack
 
 | Capa | Tecnología |
@@ -243,3 +273,4 @@ Hace upsert — no duplica, actualiza precios existentes y agrega productos nuev
 | Frontend | React 18, Vite 5, `lucide-react` |
 | Auth | Supabase Auth — Google OAuth |
 | Búsqueda vectorial | `pgvector` con índice `ivfflat` (cosine) |
+| Keep-Alive | GitHub Actions (cron cada 5 días) |
