@@ -23,7 +23,10 @@ export function useAuth() {
   const loginGoogle = () =>
     supabase?.auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo: window.location.origin },
+      options: {
+        redirectTo: window.location.origin,
+        queryParams: { prompt: "select_account" },
+      },
     });
 
   const logout = () => supabase?.auth.signOut();
