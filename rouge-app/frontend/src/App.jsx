@@ -12,8 +12,12 @@ const ANTHROPIC_URL     = `${BACKEND_URL}/api/claude`;
 const ANTHROPIC_HEADERS = { "Content-Type": "application/json" };
 
 const TIENDAS = {
-  rouge:      { label: "Rouge",      color: "#c9393e", bg: "#2a0a0a" },
-  juleriaque: { label: "Juleriaque", color: "#1a5fa8", bg: "#0a1a2a" },
+  rouge:             { label: "Rouge",               color: "#c9393e", bg: "#2a0a0a" },
+  juleriaque:        { label: "Juleriaque",          color: "#1a5fa8", bg: "#0a1a2a" },
+  farmacity:         { label: "Farmacity",           color: "#e8312a", bg: "#2a0a08" },
+  simplicity:        { label: "Simplicity",          color: "#e91e8c", bg: "#2a0a1c" },
+  beauty24:          { label: "Beauty24",            color: "#ff6b9d", bg: "#2a121c" },
+  farmaciadelpueblo: { label: "Farmacia del Pueblo", color: "#0066cc", bg: "#08142a" },
 };
 
 const MOCK = [
@@ -32,6 +36,36 @@ async function sbFetch(path) {
   return r.json();
 }
 
+// Trae TODAS las filas paginando. Supabase corta cada respuesta a 1000 filas,
+// así que con una sola request perdíamos la mayoría del catálogo. Pedimos de a
+// 1000 con Range hasta que una página venga incompleta. Orden por id para que
+// la paginación sea estable (sin filas que se repitan/salteen entre páginas).
+async function sbFetchAll(pathBase, pageSize = 1000) {
+  if (!SUPABASE_URL) return [];
+  const todo = [];
+  for (let offset = 0; ; offset += pageSize) {
+    const r = await fetch(
+      `${SUPABASE_URL}/rest/v1/${pathBase}&order=id.asc&limit=${pageSize}&offset=${offset}`,
+      { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } },
+    );
+    const page = await r.json();
+    if (!Array.isArray(page) || page.length === 0) break;
+    todo.push(...page);
+    if (page.length < pageSize) break;
+  }
+  return todo;
+}
+
+// Un perfume "tiene stock" si está disponible (con precio) en al menos una
+// tienda. La vista solo expone precios de filas Con Stock, así que sin precio
+// en ninguna variante = agotado en todas las perfumerías.
+function tieneStock(p) {
+  return (p.variantes || [p]).some(v =>
+    (v.precio_min && v.precio_min > 0) ||
+    Object.keys(TIENDAS).some(k => (v[`${k}_precio`] || 0) > 0)
+  );
+}
+
 function agruparVariantes(data) {
   const grupos = {};
   data.forEach(p => {
@@ -42,21 +76,18 @@ function agruparVariantes(data) {
       grupos[clave].variantes.push(p);
       // Usar imagen del primero que tenga
       if (!grupos[clave].imagen && p.imagen) grupos[clave].imagen = p.imagen;
-      // Flags acumulados
-      if (p.en_rouge)      grupos[clave].en_rouge = true;
-      if (p.en_juleriaque) grupos[clave].en_juleriaque = true;
+      // Flags acumulados — una tienda por cada clave de TIENDAS
+      Object.keys(TIENDAS).forEach(k => { if (p[`en_${k}`]) grupos[clave][`en_${k}`] = true; });
       if (p.tiene_oferta)  grupos[clave].tiene_oferta = true;
       // Precio mínimo global
-      const pm = p.precio_min || Math.min(...[p.rouge_precio, p.juleriaque_precio].filter(Boolean));
+      const pm = p.precio_min || Math.min(...Object.keys(TIENDAS).map(k => p[`${k}_precio`]).filter(Boolean));
       const gm = grupos[clave].precio_min || Infinity;
       if (pm < gm) grupos[clave].precio_min = pm;
-      // Máximo descuento
-      const md = Math.max(p.rouge_descuento || 0, p.juleriaque_descuento || 0);
-      const gd = Math.max(grupos[clave].rouge_descuento || 0, grupos[clave].juleriaque_descuento || 0);
-      if (md > gd) {
-        grupos[clave].rouge_descuento      = p.rouge_descuento;
-        grupos[clave].juleriaque_descuento = p.juleriaque_descuento;
-      }
+      // Máximo descuento por tienda entre variantes
+      Object.keys(TIENDAS).forEach(k => {
+        const d = p[`${k}_descuento`] || 0;
+        if (d > (grupos[clave][`${k}_descuento`] || 0)) grupos[clave][`${k}_descuento`] = d;
+      });
     }
   });
   return Object.values(grupos);
@@ -196,11 +227,13 @@ Sin texto extra.`;
 
 // ─── OFERTA DOTS ────────────────────────────────────────────────
 function OfertaDots({ perfume }) {
-  if (!perfume.rouge_descuento && !perfume.juleriaque_descuento) return null;
+  const conDescuento = Object.entries(TIENDAS).filter(([k]) => perfume[`${k}_descuento`] > 0);
+  if (conDescuento.length === 0) return null;
   return (
     <div style={{ display:"flex", gap:"3px", position:"absolute", top:"8px", left:"8px", zIndex:2 }}>
-      {perfume.rouge_descuento > 0 && <div title={`Rouge -${perfume.rouge_descuento}%`} style={{ width:"8px", height:"8px", borderRadius:"50%", background:TIENDAS.rouge.color }} />}
-      {perfume.juleriaque_descuento > 0 && <div title={`Juleriaque -${perfume.juleriaque_descuento}%`} style={{ width:"8px", height:"8px", borderRadius:"50%", background:TIENDAS.juleriaque.color }} />}
+      {conDescuento.map(([k, t]) => (
+        <div key={k} title={`${t.label} -${perfume[`${k}_descuento`]}%`} style={{ width:"8px", height:"8px", borderRadius:"50%", background:t.color }} />
+      ))}
     </div>
   );
 }
@@ -255,15 +288,18 @@ function SeguimientoModal({ perfume, onConfirm, onClose }) {
 
 // ─── PRODUCT DETAIL ─────────────────────────────────────────────
 function ProductDetail({ perfume, favoritos, onToggleFav, onBack }) {
-  const esFav = favoritos.has(perfume.id);
+  const esFav = (perfume.variantes || [perfume]).some(v => favoritos.has(v.id));
   const [showModal, setShowModal] = useState(false);
   const [varianteActiva, setVarianteActiva] = useState(perfume.variantes?.[0] || perfume);
   const variantes = perfume.variantes || [perfume];
 
-  const precioMin = Math.min(...[varianteActiva.rouge_precio, varianteActiva.juleriaque_precio].filter(p => p != null && p > 0));
-  const precioMax = Math.max(...[varianteActiva.rouge_precio, varianteActiva.juleriaque_precio].filter(p => p != null && p > 0));
-  const hayDif = varianteActiva.en_rouge && varianteActiva.en_juleriaque && precioMin !== precioMax && isFinite(precioMin) && isFinite(precioMax);
-  const tiendaMasBarata = varianteActiva.rouge_precio === precioMin ? "Rouge" : "Juleriaque";
+  const preciosTiendas = Object.keys(TIENDAS)
+    .map(k => ({ k, precio: varianteActiva[`${k}_precio`] }))
+    .filter(x => x.precio != null && x.precio > 0);
+  const precioMin = Math.min(...preciosTiendas.map(x => x.precio));
+  const precioMax = Math.max(...preciosTiendas.map(x => x.precio));
+  const hayDif = preciosTiendas.length > 1 && precioMin !== precioMax && isFinite(precioMin) && isFinite(precioMax);
+  const tiendaMasBarata = TIENDAS[preciosTiendas.find(x => x.precio === precioMin)?.k]?.label;
 
   return (
     <div style={{ minHeight:"100vh", background:"#080808" }}>
@@ -312,8 +348,13 @@ function ProductDetail({ perfume, favoritos, onToggleFav, onBack }) {
         <div style={{ marginBottom:"20px" }}>
           <p style={{ color:"#444", fontSize:"0.72rem", letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:"10px" }}>Precio por tienda</p>
           <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
-            <PrecioBadge tienda="rouge"      precio={varianteActiva.rouge_precio}      precioLista={varianteActiva.rouge_precio_lista}      descuento={varianteActiva.rouge_descuento}      link={varianteActiva.rouge_link} />
-            <PrecioBadge tienda="juleriaque" precio={varianteActiva.juleriaque_precio} precioLista={varianteActiva.juleriaque_precio_lista} descuento={varianteActiva.juleriaque_descuento} link={varianteActiva.juleriaque_link} />
+            {Object.keys(TIENDAS).map(k => (
+              <PrecioBadge key={k} tienda={k}
+                precio={varianteActiva[`${k}_precio`]}
+                precioLista={varianteActiva[`${k}_precio_lista`]}
+                descuento={varianteActiva[`${k}_descuento`]}
+                link={varianteActiva[`${k}_link`]} />
+            ))}
           </div>
           {hayDif && (
             <p style={{ color:"#4caf7d", fontSize:"0.78rem", marginTop:"10px", textAlign:"center" }}>
@@ -344,9 +385,10 @@ function ProductDetail({ perfume, favoritos, onToggleFav, onBack }) {
 
 // ─── PRODUCT CARD ───────────────────────────────────────────────
 function ProductCard({ perfume, favoritos, onToggleFav, onClick }) {
-  const esFav = favoritos.has(perfume.id);
+  const esFav = (perfume.variantes || [perfume]).some(v => favoritos.has(v.id));
   const [showModal, setShowModal] = useState(false);
-  const precioMin = perfume.precio_min || Math.min(...[perfume.rouge_precio, perfume.juleriaque_precio].filter(p => p != null && p > 0)) || 0;
+  const precioRaw = perfume.precio_min || Math.min(...Object.keys(TIENDAS).map(k => perfume[`${k}_precio`]).filter(p => p != null && p > 0));
+  const precioMin = Number.isFinite(precioRaw) && precioRaw > 0 ? precioRaw : 0; // 0 = sin stock
   const cantVariantes = perfume.variantes?.length || 1;
 
   return (
@@ -367,8 +409,9 @@ function ProductCard({ perfume, favoritos, onToggleFav, onClick }) {
             </div>
           )}
           <div style={{ position:"absolute", bottom:"6px", left:"6px", display:"flex", gap:"3px" }}>
-            {perfume.en_rouge      && <div style={{ width:"6px", height:"6px", borderRadius:"50%", background:TIENDAS.rouge.color }} />}
-            {perfume.en_juleriaque && <div style={{ width:"6px", height:"6px", borderRadius:"50%", background:TIENDAS.juleriaque.color }} />}
+            {Object.entries(TIENDAS).filter(([k]) => perfume[`en_${k}`]).map(([k, t]) => (
+              <div key={k} title={t.label} style={{ width:"6px", height:"6px", borderRadius:"50%", background:t.color }} />
+            ))}
           </div>
           <img src={perfume.imagen} alt={perfume.nombre_base}
             style={{ width:"68%", height:"68%", objectFit:"contain" }}
@@ -379,8 +422,10 @@ function ProductCard({ perfume, favoritos, onToggleFav, onClick }) {
           <p style={{ color:"#c9a84c", fontSize:"0.65rem", fontWeight:600, letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:"3px" }}>{perfume.marca}</p>
           <p style={{ color:"#ddd", fontSize:"0.82rem", lineHeight:1.3, marginBottom:"3px", fontFamily:"'Playfair Display',serif" }}>{perfume.nombre_base}</p>
           <p style={{ color:"#444", fontSize:"0.7rem", marginBottom:"10px" }}>{perfume.tipo}</p>
-          {precioMin > 0 && (
+          {precioMin > 0 ? (
             <p style={{ color:"#fff", fontWeight:700, fontSize:"0.9rem" }}>desde ${precioMin.toLocaleString("es-AR")}</p>
+          ) : (
+            <p style={{ color:"#666", fontWeight:600, fontSize:"0.78rem" }}>Sin stock</p>
           )}
         </div>
       </div>
@@ -563,11 +608,11 @@ export default function App() {
 
   const { user, cargando, loginGoogle, logout } = useAuth();
   const { favIds, toggle: _toggleFav }      = useFavoritos(user);
-  const toggleFav = (perfume) => _toggleFav(perfume.id, perfume.precio_min ?? null);
+  const toggleFav = (perfume) => _toggleFav((perfume.variantes || [perfume]).map(v => v.id), perfume.precio_min ?? null);
 
   useEffect(() => {
     if (!SUPABASE_URL) return;
-    sbFetch("perfumes_con_precios?select=*&order=nombre_base.asc&limit=5000")
+    sbFetchAll("perfumes_con_precios?select=*")
       .then(data => {
         if (Array.isArray(data) && data.length) {
           setTodosProductos(data);
@@ -582,10 +627,12 @@ export default function App() {
     if (queryActual) return;
     let base = productos;
     if (vista === "ofertas")           base = base.filter(p => p.tiene_oferta === true);
-    if (vista === "tienda_rouge")      base = base.filter(p => p.en_rouge);
-    if (vista === "tienda_juleriaque") base = base.filter(p => p.en_juleriaque);
+    if (vista.startsWith("tienda_"))   { const k = vista.replace("tienda_", ""); base = base.filter(p => p[`en_${k}`]); }
     if (vista === "favoritos")         base = base.filter(p => (p.variantes||[p]).some(v => favIds.has(v.id)));
     if (genero)                        base = base.filter(p => p.genero === genero);
+    // Ocultar agotados en todas las tiendas (salvo en favoritos, que el usuario
+    // sigue a propósito). La búsqueda los muestra porque sale antes de este effect.
+    if (vista !== "favoritos")         base = base.filter(tieneStock);
     setFiltrados(base);
   }, [vista, genero, productos, queryActual, favIds]);
 
