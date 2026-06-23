@@ -21,6 +21,11 @@ SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_KEY = os.environ["SUPABASE_KEY"]
 MODEL_NAME   = "paraphrase-multilingual-MiniLM-L12-v2"
 
+# Timestamp único de esta corrida. Todo lo scrapeado ahora lleva este valor;
+# las filas que quedan con un scraped_at anterior es porque ya no aparecieron
+# en el catálogo (desaparecieron) → se marcan Sin Stock en la reconciliación.
+RUN_TS = datetime.now(timezone.utc)
+
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Accept": "application/json",
@@ -254,7 +259,7 @@ def scrape_tienda(nombre_tienda: str) -> list:
                     "stock_estado":  "Con Stock" if stock > 0 else "Sin Stock",
                     "link":          link,
                     "clave_unica":   clave,
-                    "scraped_at":    datetime.now(timezone.utc).isoformat(),
+                    "scraped_at":    RUN_TS.isoformat(),
                 })
 
         desde += paso
@@ -385,6 +390,20 @@ def subir_supabase(perfumes_unicos: list, tiendas_items: list):
         lote = tiendas_rows[i:i+batch]
         supabase.table("perfume_tiendas").upsert(lote, on_conflict="tienda,id_sku").execute()
         print(f"  Batch {i//batch+1}: {len(lote)} registros")
+
+    # 2b. Reconciliación: marcar Sin Stock los SKUs que NO aparecieron en esta
+    # corrida (desaparecieron del catálogo). No se borran: si vuelven, el upsert
+    # los reactiva. Solo tocamos tiendas que scrapearon OK (las que devolvieron
+    # items), para no vaciar una tienda entera si su scrape falló por red.
+    tiendas_scrapeadas = {item["tienda"] for item in tiendas_items}
+    print(f"\nReconciliando stock (SKUs desaparecidos → Sin Stock)...")
+    for tienda in tiendas_scrapeadas:
+        res = (supabase.table("perfume_tiendas")
+               .update({"stock_estado": "Sin Stock"})
+               .eq("tienda", tienda)
+               .lt("scraped_at", RUN_TS.isoformat())
+               .execute())
+        print(f"  {tienda}: {len(res.data)} marcados Sin Stock")
 
     # 3. Historial de precios
     print("\nGuardando historial...")
