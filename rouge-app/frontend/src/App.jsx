@@ -14,6 +14,10 @@ const ANTHROPIC_HEADERS = { "Content-Type": "application/json" };
 const TIENDAS = {
   rouge:      { label: "Rouge",      color: "#c9393e", bg: "#2a0a0a" },
   juleriaque: { label: "Juleriaque", color: "#1a5fa8", bg: "#0a1a2a" },
+  farmacity:  { label: "Farmacity", color: "#00a651", bg: "#0a2a15" },
+  simplicity: { label: "Simplicity", color: "#e91e8c", bg: "#2a0a1a" },
+  beauty24:          { label: "Beauty24",           color: "#ff6b9d", bg: "#2a0a18" },
+  farmaciadelpueblo: { label: "Farmacia del Pueblo", color: "#0066cc", bg: "#0a1a2a" },
 };
 
 const MOCK = [
@@ -40,23 +44,14 @@ function agruparVariantes(data) {
       grupos[clave] = { ...p, variantes: [p] };
     } else {
       grupos[clave].variantes.push(p);
-      // Usar imagen del primero que tenga
       if (!grupos[clave].imagen && p.imagen) grupos[clave].imagen = p.imagen;
-      // Flags acumulados
-      if (p.en_rouge)      grupos[clave].en_rouge = true;
-      if (p.en_juleriaque) grupos[clave].en_juleriaque = true;
-      if (p.tiene_oferta)  grupos[clave].tiene_oferta = true;
-      // Precio mínimo global
-      const pm = p.precio_min || Math.min(...[p.rouge_precio, p.juleriaque_precio].filter(Boolean));
+      Object.keys(TIENDAS).forEach(t => {
+        if (p[`en_${t}`]) grupos[clave][`en_${t}`] = true;
+        if (p.tiene_oferta) grupos[clave].tiene_oferta = true;
+      });
+      const pm = p.precio_min || Infinity;
       const gm = grupos[clave].precio_min || Infinity;
       if (pm < gm) grupos[clave].precio_min = pm;
-      // Máximo descuento
-      const md = Math.max(p.rouge_descuento || 0, p.juleriaque_descuento || 0);
-      const gd = Math.max(grupos[clave].rouge_descuento || 0, grupos[clave].juleriaque_descuento || 0);
-      if (md > gd) {
-        grupos[clave].rouge_descuento      = p.rouge_descuento;
-        grupos[clave].juleriaque_descuento = p.juleriaque_descuento;
-      }
     }
   });
   return Object.values(grupos);
@@ -196,11 +191,14 @@ Sin texto extra.`;
 
 // ─── OFERTA DOTS ────────────────────────────────────────────────
 function OfertaDots({ perfume }) {
-  if (!perfume.rouge_descuento && !perfume.juleriaque_descuento) return null;
+  const tiendas = Object.keys(TIENDAS).filter(t => (perfume[`${t}_descuento`] || 0) > 0);
+  if (!tiendas.length) return null;
   return (
     <div style={{ display:"flex", gap:"3px", position:"absolute", top:"8px", left:"8px", zIndex:2 }}>
-      {perfume.rouge_descuento > 0 && <div title={`Rouge -${perfume.rouge_descuento}%`} style={{ width:"8px", height:"8px", borderRadius:"50%", background:TIENDAS.rouge.color }} />}
-      {perfume.juleriaque_descuento > 0 && <div title={`Juleriaque -${perfume.juleriaque_descuento}%`} style={{ width:"8px", height:"8px", borderRadius:"50%", background:TIENDAS.juleriaque.color }} />}
+      {tiendas.map(t => (
+        <div key={t} title={`${TIENDAS[t].label} -${perfume[`${t}_descuento`]}%`}
+          style={{ width:"8px", height:"8px", borderRadius:"50%", background:TIENDAS[t].color }} />
+      ))}
     </div>
   );
 }
@@ -260,10 +258,12 @@ function ProductDetail({ perfume, favoritos, onToggleFav, onBack }) {
   const [varianteActiva, setVarianteActiva] = useState(perfume.variantes?.[0] || perfume);
   const variantes = perfume.variantes || [perfume];
 
-  const precioMin = Math.min(...[varianteActiva.rouge_precio, varianteActiva.juleriaque_precio].filter(p => p != null && p > 0));
-  const precioMax = Math.max(...[varianteActiva.rouge_precio, varianteActiva.juleriaque_precio].filter(p => p != null && p > 0));
-  const hayDif = varianteActiva.en_rouge && varianteActiva.en_juleriaque && precioMin !== precioMax && isFinite(precioMin) && isFinite(precioMax);
-  const tiendaMasBarata = varianteActiva.rouge_precio === precioMin ? "Rouge" : "Juleriaque";
+  const precios = Object.keys(TIENDAS).map(t => varianteActiva[`${t}_precio`]).filter(p => p != null && p > 0);
+  const precioMin = precios.length ? Math.min(...precios) : 0;
+  const precioMax = precios.length ? Math.max(...precios) : 0;
+  const hayDif = precios.length > 1 && precioMin !== precioMax;
+  const tiendaMasBarata = Object.keys(TIENDAS).find(t => varianteActiva[`${t}_precio`] === precioMin);
+  const labelMasBarata = tiendaMasBarata ? TIENDAS[tiendaMasBarata].label : "";
 
   return (
     <div style={{ minHeight:"100vh", background:"#080808" }}>
@@ -312,12 +312,17 @@ function ProductDetail({ perfume, favoritos, onToggleFav, onBack }) {
         <div style={{ marginBottom:"20px" }}>
           <p style={{ color:"#444", fontSize:"0.72rem", letterSpacing:"0.08em", textTransform:"uppercase", marginBottom:"10px" }}>Precio por tienda</p>
           <div style={{ display:"flex", flexDirection:"column", gap:"8px" }}>
-            <PrecioBadge tienda="rouge"      precio={varianteActiva.rouge_precio}      precioLista={varianteActiva.rouge_precio_lista}      descuento={varianteActiva.rouge_descuento}      link={varianteActiva.rouge_link} />
-            <PrecioBadge tienda="juleriaque" precio={varianteActiva.juleriaque_precio} precioLista={varianteActiva.juleriaque_precio_lista} descuento={varianteActiva.juleriaque_descuento} link={varianteActiva.juleriaque_link} />
+            {Object.keys(TIENDAS).map(t => (
+              <PrecioBadge key={t} tienda={t}
+              precio={varianteActiva[`${t}_precio`]}
+              precioLista={varianteActiva[`${t}_precio_lista`]}
+              descuento={varianteActiva[`${t}_descuento`]}
+              link={varianteActiva[`${t}_link`]} />
+            ))}
           </div>
           {hayDif && (
             <p style={{ color:"#4caf7d", fontSize:"0.78rem", marginTop:"10px", textAlign:"center" }}>
-              Ahorrás ${(precioMax - precioMin).toLocaleString("es-AR")} comprando en {tiendaMasBarata}
+              Ahorrás ${(precioMax - precioMin).toLocaleString("es-AR")} comprando en {labelMasBarata}
             </p>
           )}
         </div>
@@ -366,10 +371,11 @@ function ProductCard({ perfume, favoritos, onToggleFav, onClick }) {
               {cantVariantes} tamaños
             </div>
           )}
-          <div style={{ position:"absolute", bottom:"6px", left:"6px", display:"flex", gap:"3px" }}>
-            {perfume.en_rouge      && <div style={{ width:"6px", height:"6px", borderRadius:"50%", background:TIENDAS.rouge.color }} />}
-            {perfume.en_juleriaque && <div style={{ width:"6px", height:"6px", borderRadius:"50%", background:TIENDAS.juleriaque.color }} />}
-          </div>
+        <div style={{ position:"absolute", bottom:"6px", left:"6px", display:"flex", gap:"3px" }}>
+            {Object.keys(TIENDAS).map(t => perfume[`en_${t}`] &&
+            <div key={t} style={{ width:"6px", height:"6px", borderRadius:"50%", background:TIENDAS[t].color }} />
+        )}
+        </div>
           <img src={perfume.imagen} alt={perfume.nombre_base}
             style={{ width:"68%", height:"68%", objectFit:"contain" }}
             onError={e => e.target.style.display="none"} />
@@ -582,8 +588,10 @@ export default function App() {
     if (queryActual) return;
     let base = productos;
     if (vista === "ofertas")           base = base.filter(p => p.tiene_oferta === true);
-    if (vista === "tienda_rouge")      base = base.filter(p => p.en_rouge);
-    if (vista === "tienda_juleriaque") base = base.filter(p => p.en_juleriaque);
+    if (vista.startsWith("tienda_")) {
+    const t = vista.replace("tienda_", "");
+    base = base.filter(p => p[`en_${t}`]);
+    }
     if (vista === "favoritos")         base = base.filter(p => (p.variantes||[p]).some(v => favIds.has(v.id)));
     if (genero)                        base = base.filter(p => p.genero === genero);
     setFiltrados(base);
