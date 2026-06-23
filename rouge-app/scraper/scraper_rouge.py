@@ -37,11 +37,33 @@ TIENDAS = {
         "base_url": "https://www.juleriaque.com.ar/api/catalog_system/pub/products/search/fragancias",
         "base_link": "https://www.juleriaque.com.ar",
     },
+        "farmacity": {
+        "base_url": "https://www.farmacity.com/api/catalog_system/pub/products/search/fragancias",
+        "base_link": "https://www.farmacity.com",
+    },
+
+    "simplicity": {
+        "base_url": "https://www.simplicity.com.ar/api/catalog_system/pub/products/search/fragancias",
+        "base_link": "https://www.simplicity.com.ar",
+    },
+
+    "beauty24": {
+        "base_url": "https://www.beauty24.com.ar/api/catalog_system/pub/products/search/fragancias",
+        "base_link": "https://www.beauty24.com.ar",
+    },
+    "farmaciadelpueblo": {
+        "base_url": "https://www.farmaciadelpueblo.com.ar/api/catalog_system/pub/products/search/fragancias",
+        "base_link": "https://www.farmaciadelpueblo.com.ar",
+    },
 }
 
 COLORES_TIENDA = {
     "rouge":      "#c9393e",
     "juleriaque": "#1a5fa8",
+    "farmacity":  "#e8312a",
+    "simplicity": "#e91e8c",
+    "beauty24":          "#ff6b9d",
+    "farmaciadelpueblo": "#0066cc",  
 }
 
 # ─── NORMALIZACIÓN ───────────────────────────────────────────────
@@ -192,9 +214,10 @@ def scrape_tienda(nombre_tienda: str) -> list:
                     precio_lista = oferta.get("PriceWithoutDiscount", 0)
                 else:
                     precio_lista = oferta.get("ListPrice", 0)
+                # Cargamos también los sin stock (marcados como "Sin Stock").
+                # No se borran: si vuelven a tener stock, el upsert los reactiva.
+                # El front/vista los oculta del catálogo pero quedan en la DB.
                 stock        = oferta.get("AvailableQuantity", 0)
-                if stock == 0:
-                    continue
 
                 descuento = 0
                 if precio_lista > precio_final > 0:
@@ -243,55 +266,40 @@ def scrape_tienda(nombre_tienda: str) -> list:
 
 # ─── DEDUPLICACIÓN ───────────────────────────────────────────────
 
-def deduplicar(rouge_items: list, juleriaque_items: list) -> tuple[list, list]:
-    """
-    Retorna:
-      - perfumes_unicos: lista de entidades únicas (para tabla perfumes)
-      - tiendas_items: lista de registros por tienda (para tabla perfume_tiendas)
-    """
-    perfumes_map = {}  # clave_unica → perfume base
+def deduplicar(todos_items: list) -> tuple[list, list]:
+    perfumes_map = {}
 
-    # Rouge tiene prioridad para imagen y descripción
-    for item in rouge_items + juleriaque_items:
+    for item in todos_items:
         clave = item["clave_unica"]
         if clave not in perfumes_map:
             perfumes_map[clave] = {
-                "marca":        item["marca"],
-                "nombre_base":  item["nombre_base"],
-                "tipo":         item["tipo"],
-                "tamaño":       item["tamaño"],
-                "genero":       item["genero"],
-                "descripcion":  item["descripcion"],
-                "imagen":       item["imagen"],
-                "clave_unica":  clave,
+                "marca":       item["marca"],
+                "nombre_base": item["nombre_base"],
+                "tipo":        item["tipo"],
+                "tamaño":      item["tamaño"],
+                "genero":      item["genero"],
+                "descripcion": item["descripcion"],
+                "imagen":      item["imagen"],
+                "clave_unica": clave,
             }
         else:
-            # Si Rouge ya puso imagen/desc, no pisamos con Juleriaque
             existing = perfumes_map[clave]
             if item["tienda"] == "rouge":
-                if item["imagen"]:
-                    existing["imagen"] = item["imagen"]
-                if item["descripcion"]:
-                    existing["descripcion"] = item["descripcion"]
+                if item["imagen"]:      existing["imagen"]      = item["imagen"]
+                if item["descripcion"]: existing["descripcion"] = item["descripcion"]
             else:
-                # Juleriaque solo completa si falta
-                if not existing["imagen"] and item["imagen"]:
-                    existing["imagen"] = item["imagen"]
-                if not existing["descripcion"] and item["descripcion"]:
-                    existing["descripcion"] = item["descripcion"]
+                if not existing["imagen"]      and item["imagen"]:      existing["imagen"]      = item["imagen"]
+                if not existing["descripcion"] and item["descripcion"]: existing["descripcion"] = item["descripcion"]
 
     perfumes_unicos = list(perfumes_map.values())
-    tiendas_items   = rouge_items + juleriaque_items
-
     print(f"\nDeduplicación:")
-    print(f"  Rouge:      {len(rouge_items)} variantes")
-    print(f"  Juleriaque: {len(juleriaque_items)} variantes")
-    print(f"  Únicos:     {len(perfumes_unicos)} perfumes")
-    print(f"  Solo Rouge:      {len([p for p in perfumes_unicos if p['clave_unica'] not in {i['clave_unica'] for i in juleriaque_items}])}")
-    print(f"  Solo Juleriaque: {len([p for p in perfumes_unicos if p['clave_unica'] not in {i['clave_unica'] for i in rouge_items}])}")
-    print(f"  En ambas:        {len([p for p in perfumes_unicos if p['clave_unica'] in {i['clave_unica'] for i in rouge_items} and p['clave_unica'] in {i['clave_unica'] for i in juleriaque_items}])}")
+    print(f"  Total variantes: {len(todos_items)}")
+    print(f"  Únicos:          {len(perfumes_unicos)}")
+    for tienda in TIENDAS:
+        count = len([i for i in todos_items if i["tienda"] == tienda])
+        print(f"  {tienda}: {count} variantes")
 
-    return perfumes_unicos, tiendas_items
+    return perfumes_unicos, todos_items
 
 
 # ─── EMBEDDINGS ──────────────────────────────────────────────────
@@ -398,14 +406,12 @@ def subir_supabase(perfumes_unicos: list, tiendas_items: list):
 # ─── MAIN ────────────────────────────────────────────────────────
 
 def main():
-    # Scraping
-    rouge_items      = scrape_tienda("rouge")
-    juleriaque_items = scrape_tienda("juleriaque")
+    todos_items = []
+    for nombre_tienda in TIENDAS:
+        todos_items += scrape_tienda(nombre_tienda)
 
-    # Deduplicar
-    perfumes_unicos, tiendas_items = deduplicar(rouge_items, juleriaque_items)
+    perfumes_unicos, tiendas_items = deduplicar(todos_items)
 
-    # Backup JSON
     with open("catalogo_comparador.json", "w", encoding="utf-8") as f:
         json.dump({
             "perfumes": [{k:v for k,v in p.items() if k != "embedding"} for p in perfumes_unicos],
@@ -413,10 +419,7 @@ def main():
         }, f, ensure_ascii=False, indent=2)
     print("Backup en catalogo_comparador.json")
 
-    # Embeddings
     perfumes_unicos = generar_embeddings(perfumes_unicos)
-
-    # Supabase
     subir_supabase(perfumes_unicos, tiendas_items)
 
     print("\nListo.")

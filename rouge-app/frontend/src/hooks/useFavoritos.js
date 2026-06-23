@@ -24,18 +24,25 @@ export function useFavoritos(user) {
     }
   }, [user]);
 
-  const toggle = useCallback(async (perfumeId, precioActual) => {
+  // Acepta una o varias ids (todas las variantes de un perfume agrupado).
+  // Así el favorito se trata como grupo: si alguna variante está guardada se
+  // considera favorito, y al quitarlo se borran TODAS las variantes.
+  const toggle = useCallback(async (perfumeIds, precioActual) => {
+    const ids = Array.isArray(perfumeIds) ? perfumeIds : [perfumeIds];
     const next = new Set(favIds);
-    if (next.has(perfumeId)) {
-      next.delete(perfumeId);
+    const yaEsFav = ids.some(id => next.has(id));
+
+    if (yaEsFav) {
+      ids.forEach(id => next.delete(id));
       if (user && supabase)
-        await supabase.from("favoritos").delete().match({ user_id: user.id, perfume_id: perfumeId });
+        await supabase.from("favoritos").delete().eq("user_id", user.id).in("perfume_id", ids);
     } else {
-      next.add(perfumeId);
+      const repId = ids[0];
+      next.add(repId);
       if (user && supabase)
         await supabase.from("favoritos").upsert({
           user_id: user.id,
-          perfume_id: perfumeId,
+          perfume_id: repId,
           precio_al_guardar: precioActual ?? null,
         });
     }

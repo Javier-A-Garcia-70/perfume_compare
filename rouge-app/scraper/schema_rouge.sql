@@ -81,27 +81,70 @@ create index if not exists tiendas_desc_idx       on perfume_tiendas(descuento d
 create index if not exists historial_sku_idx      on precio_historial(id_sku, registrado_at desc);
 
 -- VISTA (drop if exists para recrearla)
+-- Actualizar este bloque cada vez que se agrega una tienda nueva.
 drop view if exists perfumes_con_precios;
 create view perfumes_con_precios as
 select
   p.id, p.marca, p.nombre_base, p.tipo, p.tamaño, p.genero,
   p.descripcion, p.imagen, p.clave_unica,
+
+  -- Rouge
   max(case when t.tienda = 'rouge'      then t.precio_final  end) as rouge_precio,
   max(case when t.tienda = 'rouge'      then t.precio_lista  end) as rouge_precio_lista,
   max(case when t.tienda = 'rouge'      then t.descuento     end) as rouge_descuento,
   max(case when t.tienda = 'rouge'      then t.link          end) as rouge_link,
   max(case when t.tienda = 'rouge'      then t.stock_estado  end) as rouge_stock,
+  bool_or(t.tienda = 'rouge')      as en_rouge,
+
+  -- Juleriaque
   max(case when t.tienda = 'juleriaque' then t.precio_final  end) as juleriaque_precio,
   max(case when t.tienda = 'juleriaque' then t.precio_lista  end) as juleriaque_precio_lista,
   max(case when t.tienda = 'juleriaque' then t.descuento     end) as juleriaque_descuento,
   max(case when t.tienda = 'juleriaque' then t.link          end) as juleriaque_link,
   max(case when t.tienda = 'juleriaque' then t.stock_estado  end) as juleriaque_stock,
-  bool_or(t.tienda = 'rouge')      as en_rouge,
   bool_or(t.tienda = 'juleriaque') as en_juleriaque,
+
+  -- Farmacity
+  max(case when t.tienda = 'farmacity'  then t.precio_final  end) as farmacity_precio,
+  max(case when t.tienda = 'farmacity'  then t.precio_lista  end) as farmacity_precio_lista,
+  max(case when t.tienda = 'farmacity'  then t.descuento     end) as farmacity_descuento,
+  max(case when t.tienda = 'farmacity'  then t.link          end) as farmacity_link,
+  max(case when t.tienda = 'farmacity'  then t.stock_estado  end) as farmacity_stock,
+  bool_or(t.tienda = 'farmacity')  as en_farmacity,
+
+  -- Simplicity
+  max(case when t.tienda = 'simplicity' then t.precio_final  end) as simplicity_precio,
+  max(case when t.tienda = 'simplicity' then t.precio_lista  end) as simplicity_precio_lista,
+  max(case when t.tienda = 'simplicity' then t.descuento     end) as simplicity_descuento,
+  max(case when t.tienda = 'simplicity' then t.link          end) as simplicity_link,
+  max(case when t.tienda = 'simplicity' then t.stock_estado  end) as simplicity_stock,
+  bool_or(t.tienda = 'simplicity') as en_simplicity,
+
+  -- Beauty24
+  max(case when t.tienda = 'beauty24'   then t.precio_final  end) as beauty24_precio,
+  max(case when t.tienda = 'beauty24'   then t.precio_lista  end) as beauty24_precio_lista,
+  max(case when t.tienda = 'beauty24'   then t.descuento     end) as beauty24_descuento,
+  max(case when t.tienda = 'beauty24'   then t.link          end) as beauty24_link,
+  max(case when t.tienda = 'beauty24'   then t.stock_estado  end) as beauty24_stock,
+  bool_or(t.tienda = 'beauty24')   as en_beauty24,
+
+  -- Farmacia del Pueblo
+  max(case when t.tienda = 'farmaciadelpueblo' then t.precio_final  end) as farmaciadelpueblo_precio,
+  max(case when t.tienda = 'farmaciadelpueblo' then t.precio_lista  end) as farmaciadelpueblo_precio_lista,
+  max(case when t.tienda = 'farmaciadelpueblo' then t.descuento     end) as farmaciadelpueblo_descuento,
+  max(case when t.tienda = 'farmaciadelpueblo' then t.link          end) as farmaciadelpueblo_link,
+  max(case when t.tienda = 'farmaciadelpueblo' then t.stock_estado  end) as farmaciadelpueblo_stock,
+  bool_or(t.tienda = 'farmaciadelpueblo') as en_farmaciadelpueblo,
+
+  -- Globales
   bool_or(t.descuento > 0)         as tiene_oferta,
   min(t.precio_final)              as precio_min
 from perfumes p
-left join perfume_tiendas t on t.perfume_id = p.id
+-- Solo unimos filas CON stock: así precios, badges y precio_min reflejan
+-- únicamente lo disponible. Un perfume agotado en todas las tiendas queda
+-- en la vista (gracias al left join) pero con todas las columnas de precio
+-- en null → el front lo oculta del catálogo (sigue apareciendo en búsqueda).
+left join perfume_tiendas t on t.perfume_id = p.id and t.stock_estado = 'Con Stock'
 group by p.id, p.marca, p.nombre_base, p.tipo, p.tamaño,
          p.genero, p.descripcion, p.imagen, p.clave_unica;
 
