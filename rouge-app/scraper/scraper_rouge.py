@@ -329,12 +329,28 @@ def generar_embeddings(perfumes: list) -> list:
 
 # ─── SUPABASE ────────────────────────────────────────────────────
 
+def _ejecutar(hacer, descripcion="operación", intentos=4, espera=4):
+    """Ejecuta una llamada a Supabase reintentando ante errores de red/TLS
+    transitorios (p.ej. SSLV3_ALERT_BAD_RECORD_MAC por conexión inestable)."""
+    for n in range(1, intentos + 1):
+        try:
+            return hacer()
+        except Exception as e:
+            if n == intentos:
+                print(f"  ✗ {descripcion}: falló tras {intentos} intentos ({type(e).__name__})")
+                raise
+            print(f"  ⚠ {descripcion}: intento {n}/{intentos} falló ({type(e).__name__}); reintento en {espera}s...")
+            time.sleep(espera)
+
+
 def subir_supabase(perfumes_unicos: list, tiendas_items: list):
     supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
     # 1. Upsert perfumes únicos
+    # Batch chico: cada fila lleva un embedding de 384 dims (payload pesado);
+    # lotes grandes sobre TLS inestable disparan el SSL bad record mac.
     print(f"\nSubiendo {len(perfumes_unicos)} perfumes únicos...")
-    batch = 50
+    batch = 25
     clave_to_id = {}
 
     for i in range(0, len(perfumes_unicos), batch):
@@ -352,11 +368,17 @@ def subir_supabase(perfumes_unicos: list, tiendas_items: list):
             "updated_at":   datetime.now(timezone.utc).isoformat(),
         } for p in lote]
 
-        res = supabase.table("perfumes").upsert(rows, on_conflict="clave_unica").execute()
+        _ejecutar(
+            lambda rows=rows: supabase.table("perfumes").upsert(rows, on_conflict="clave_unica").execute(),
+            descripcion=f"upsert perfumes batch {i//batch+1}",
+        )
         print(f"  Batch {i//batch+1}: {len(lote)} perfumes")
 
     # Obtener IDs generados
-    res = supabase.table("perfumes").select("id, clave_unica").execute()
+    res = _ejecutar(
+        lambda: supabase.table("perfumes").select("id, clave_unica").execute(),
+        descripcion="select ids perfumes",
+    )
     for row in res.data:
         clave_to_id[row["clave_unica"]] = row["id"]
 
@@ -388,7 +410,10 @@ def subir_supabase(perfumes_unicos: list, tiendas_items: list):
 
     for i in range(0, len(tiendas_rows), batch):
         lote = tiendas_rows[i:i+batch]
-        supabase.table("perfume_tiendas").upsert(lote, on_conflict="tienda,id_sku").execute()
+        _ejecutar(
+            lambda lote=lote: supabase.table("perfume_tiendas").upsert(lote, on_conflict="tienda,id_sku").execute(),
+            descripcion=f"upsert tiendas batch {i//batch+1}",
+        )
         print(f"  Batch {i//batch+1}: {len(lote)} registros")
 
     # 2b. Reconciliación: marcar Sin Stock los SKUs que NO aparecieron en esta
@@ -398,11 +423,14 @@ def subir_supabase(perfumes_unicos: list, tiendas_items: list):
     tiendas_scrapeadas = {item["tienda"] for item in tiendas_items}
     print(f"\nReconciliando stock (SKUs desaparecidos → Sin Stock)...")
     for tienda in tiendas_scrapeadas:
-        res = (supabase.table("perfume_tiendas")
-               .update({"stock_estado": "Sin Stock"})
-               .eq("tienda", tienda)
-               .lt("scraped_at", RUN_TS.isoformat())
-               .execute())
+        res = _ejecutar(
+            lambda tienda=tienda: (supabase.table("perfume_tiendas")
+                   .update({"stock_estado": "Sin Stock"})
+                   .eq("tienda", tienda)
+                   .lt("scraped_at", RUN_TS.isoformat())
+                   .execute()),
+            descripcion=f"reconciliar {tienda}",
+        )
         print(f"  {tienda}: {len(res.data)} marcados Sin Stock")
 
     # 3. Historial de precios
@@ -417,7 +445,10 @@ def subir_supabase(perfumes_unicos: list, tiendas_items: list):
     } for item in tiendas_items]
 
     for i in range(0, len(hist), 100):
-        supabase.table("precio_historial").insert(hist[i:i+100]).execute()
+        _ejecutar(
+            lambda lote=hist[i:i+100]: supabase.table("precio_historial").insert(lote).execute(),
+            descripcion=f"historial batch {i//100+1}",
+        )
 
     print("\nCarga completa.")
 
