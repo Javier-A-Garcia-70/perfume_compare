@@ -740,9 +740,9 @@ export default function App() {
         )}
 
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:"20px", flexWrap:"wrap", gap:"10px" }}>
-          <div style={{ display:"flex", gap:"12px", alignItems:"center" }}>
+          <div style={{ display:"flex", gap:"8px", alignItems:"center", flexWrap:"wrap" }}>
             {Object.entries(TIENDAS).map(([k,t]) => (
-              <div key={k} style={{ display:"flex", alignItems:"center", gap:"5px" }}>
+              <div key={k} style={{ display:"flex", alignItems:"center", gap:"4px" }}>
                 <div style={{ width:"7px", height:"7px", borderRadius:"50%", background:t.color }} />
                 <span style={{ color:"#333", fontSize:"0.7rem" }}>{t.label}</span>
               </div>
@@ -770,7 +770,7 @@ export default function App() {
             <p>No se encontraron perfumes.</p>
           </div>
         ) : (
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(175px, 1fr))", gap:"14px" }}>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(150px, 1fr))", gap:"14px" }}>
             {aplicarOrden(filtrados).map((p, i) => (
               <ProductCard key={p.id || p.clave_unica || i} perfume={p} favoritos={favIds} onToggleFav={toggleFav} onClick={() => setDetalle(p)} />
             ))}
