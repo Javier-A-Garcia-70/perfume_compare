@@ -525,11 +525,14 @@ function Navbar({ menuAbierto, setMenuAbierto, setBuscadorOpen, setVista, setGen
             {menuAbierto ? <X size={21} color="#c9a84c" /> : <Menu size={21} />}
           </button>
         </div>
-        {/* Centro */}
-        <div style={{ flex:1, textAlign:"center", pointerEvents:"none" }}>
-          <span style={{ fontFamily:"'Playfair Display',serif", fontSize:"1.05rem", color:"#fff", letterSpacing:"0.06em" }}>
-            perfume<span style={{ color:"#c9a84c" }}>compare</span>
-          </span>
+        {/* Centro — el logo solo sube al tope, sin cambiar de sección */}
+        <div style={{ flex:1, textAlign:"center" }}>
+          <button onClick={() => window.scrollTo({ top:0, behavior:"smooth" })}
+            style={{ background:"none", border:"none", cursor:"pointer", padding:0 }}>
+            <span style={{ fontFamily:"'Playfair Display',serif", fontSize:"1.05rem", color:"#fff", letterSpacing:"0.06em" }}>
+              perfume<span style={{ color:"#c9a84c" }}>compare</span>
+            </span>
+          </button>
         </div>
         {/* Derecha */}
         <div style={{ flex:"0 0 auto", display:"flex", alignItems:"center", gap:"4px" }}>
@@ -673,6 +676,10 @@ export default function App() {
     if (vista !== "favoritos")         base = base.filter(tieneStock);
     setFiltrados(base);
   }, [vista, genero, productos, queryActual, favIds]);
+
+  // Al cambiar de sección/género/búsqueda, arrancar siempre arriba, no heredar
+  // la altura del scroll de donde venías.
+  useEffect(() => { window.scrollTo(0, 0); }, [vista, genero, queryActual]);
 
   const onResultados = (res, query) => {
     const agrupados = agruparVariantes(res);
