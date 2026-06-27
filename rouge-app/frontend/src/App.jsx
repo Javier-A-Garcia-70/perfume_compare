@@ -293,6 +293,10 @@ function ProductDetail({ perfume, favoritos, onToggleFav, onBack }) {
   const [varianteActiva, setVarianteActiva] = useState(perfume.variantes?.[0] || perfume);
   const variantes = perfume.variantes || [perfume];
 
+  // Al abrir el detalle, arrancar siempre desde arriba (la foto), no heredar
+  // el scroll del catálogo. Se reejecuta si se abre otro perfume distinto.
+  useEffect(() => { window.scrollTo(0, 0); }, [perfume]);
+
   const preciosTiendas = Object.keys(TIENDAS)
     .map(k => ({ k, precio: varianteActiva[`${k}_precio`] }))
     .filter(x => x.precio != null && x.precio > 0);
@@ -593,12 +597,38 @@ function guardarBusqueda(q) {
   } catch {}
 }
 
+// ─── SKELETON (carga) ───────────────────────────────────────────
+// Réplica gris de ProductCard mientras llega el catálogo. El brillo lo
+// aporta la clase .sk (definida en GlobalStyles).
+function SkeletonCard() {
+  return (
+    <div style={{ background:"#0f0f0f", border:"1px solid #1a1a1a", borderRadius:"14px", overflow:"hidden" }}>
+      <div className="sk" style={{ aspectRatio:"1", borderRadius:0 }} />
+      <div style={{ padding:"12px" }}>
+        <div className="sk" style={{ height:"9px",  width:"40%", marginBottom:"8px" }} />
+        <div className="sk" style={{ height:"12px", width:"75%", marginBottom:"8px" }} />
+        <div className="sk" style={{ height:"9px",  width:"30%", marginBottom:"12px" }} />
+        <div className="sk" style={{ height:"14px", width:"55%" }} />
+      </div>
+    </div>
+  );
+}
+
+function SkeletonGrid() {
+  return (
+    <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(150px, 1fr))", gap:"14px" }}>
+      {Array.from({ length: 10 }).map((_, i) => <SkeletonCard key={i} />)}
+    </div>
+  );
+}
+
 // ─── APP ────────────────────────────────────────────────────────
 export default function App() {
   const [todosProductos, setTodosProductos] = useState([]);
-  const [productos, setProductos]           = useState(MOCK);
-  const [filtrados, setFiltrados]           = useState(MOCK);
-  const [vista, setVista]                   = useState("ofertas");
+  const [productos, setProductos]           = useState([]);
+  const [filtrados, setFiltrados]           = useState([]);
+  const [estadoCarga, setEstadoCarga]       = useState("cargando"); // "cargando" | "ok" | "error"
+  const [vista, setVista]                   = useState("catalogo");
   const [genero, setGenero]                 = useState(null);
   const [queryActual, setQueryActual]       = useState(null);
   const [menuAbierto, setMenuAbierto]       = useState(false);
@@ -611,16 +641,24 @@ export default function App() {
   const toggleFav = (perfume) => _toggleFav((perfume.variantes || [perfume]).map(v => v.id), perfume.precio_min ?? null);
 
   useEffect(() => {
-    if (!SUPABASE_URL) return;
+    // Sin Supabase configurado: modo demo local con datos MOCK.
+    if (!SUPABASE_URL) {
+      setProductos(MOCK);
+      setEstadoCarga("ok");
+      return;
+    }
     sbFetchAll("perfumes_con_precios?select=*")
       .then(data => {
         if (Array.isArray(data) && data.length) {
           setTodosProductos(data);
-          const agrupados = agruparVariantes(data);
-          setProductos(agrupados);
+          setProductos(agruparVariantes(data));
+          setEstadoCarga("ok");
+        } else {
+          // Respuesta vacía: catálogo sin datos (scraper caído o DB vacía).
+          setEstadoCarga("error");
         }
       })
-      .catch(() => {});
+      .catch(() => setEstadoCarga("error"));
   }, []);
 
   useEffect(() => {
@@ -728,53 +766,73 @@ export default function App() {
           )}
         </div>
 
-        {vista === "catalogo" && !queryActual && (
-          <div style={{ display:"flex", gap:"6px", marginBottom:"20px", flexWrap:"wrap" }}>
-            {[null,"Femenino","Masculino","Unisex"].map(g => (
-              <button key={g||"todos"} onClick={() => setGenero(g)}
-                style={{ padding:"6px 14px", borderRadius:"20px", border:`1px solid ${genero===g?"#c9a84c":"#1e1e1e"}`, background:genero===g?"rgba(201,168,76,0.08)":"transparent", color:genero===g?"#c9a84c":"#444", cursor:"pointer", fontSize:"0.75rem", fontWeight:genero===g?700:400, transition:"all 0.15s" }}>
-                {g||"Todos"}
-              </button>
-            ))}
+        {estadoCarga === "cargando" && <SkeletonGrid />}
+
+        {estadoCarga === "error" && (
+          <div style={{ textAlign:"center", padding:"60px 24px", color:"#555" }}>
+            <Sparkles size={28} style={{ marginBottom:"14px", opacity:0.25, color:"#c9a84c" }} />
+            <p style={{ color:"#ccc", fontSize:"1rem", marginBottom:"8px", fontFamily:"'Playfair Display',serif" }}>No pudimos cargar el catálogo</p>
+            <p style={{ color:"#555", fontSize:"0.85rem", marginBottom:"24px", lineHeight:1.6 }}>
+              El servicio puede estar temporalmente caído.<br />Recargá la página o intentá de nuevo en unos minutos.
+            </p>
+            <button onClick={() => window.location.reload()}
+              style={{ padding:"11px 24px", background:"#c9a84c", color:"#000", border:"none", borderRadius:"10px", fontWeight:700, cursor:"pointer", fontSize:"0.85rem" }}>
+              Recargar
+            </button>
           </div>
         )}
 
-        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:"20px", flexWrap:"wrap", gap:"10px" }}>
-          <div style={{ display:"flex", gap:"8px", alignItems:"center", flexWrap:"wrap" }}>
-            {Object.entries(TIENDAS).map(([k,t]) => (
-              <div key={k} style={{ display:"flex", alignItems:"center", gap:"4px" }}>
-                <div style={{ width:"7px", height:"7px", borderRadius:"50%", background:t.color }} />
-                <span style={{ color:"#333", fontSize:"0.7rem" }}>{t.label}</span>
+        {estadoCarga === "ok" && (
+          <>
+            {vista === "catalogo" && !queryActual && (
+              <div style={{ display:"flex", gap:"6px", marginBottom:"20px", flexWrap:"wrap" }}>
+                {[null,"Femenino","Masculino","Unisex"].map(g => (
+                  <button key={g||"todos"} onClick={() => setGenero(g)}
+                    style={{ padding:"6px 14px", borderRadius:"20px", border:`1px solid ${genero===g?"#c9a84c":"#1e1e1e"}`, background:genero===g?"rgba(201,168,76,0.08)":"transparent", color:genero===g?"#c9a84c":"#444", cursor:"pointer", fontSize:"0.75rem", fontWeight:genero===g?700:400, transition:"all 0.15s" }}>
+                    {g||"Todos"}
+                  </button>
+                ))}
               </div>
-            ))}
-            <span style={{ color:"#2a2a2a", fontSize:"0.7rem" }}>· {filtrados.length} perfumes</span>
-          </div>
-          <div style={{ display:"flex", gap:"4px" }}>
-            {[
-              { id:"az",          label:"A-Z" },
-              { id:"za",          label:"Z-A" },
-              { id:"precio_asc",  label:"$ ↑" },
-              { id:"precio_desc", label:"$ ↓" },
-            ].map(o => (
-              <button key={o.id} onClick={() => setOrden(o.id)}
-                style={{ padding:"4px 10px", borderRadius:"16px", border:`1px solid ${orden===o.id?"#c9a84c":"#1e1e1e"}`, background:orden===o.id?"rgba(201,168,76,0.08)":"transparent", color:orden===o.id?"#c9a84c":"#444", cursor:"pointer", fontSize:"0.72rem", fontWeight:orden===o.id?700:400, transition:"all 0.15s" }}>
-                {o.label}
-              </button>
-            ))}
-          </div>
-        </div>
+            )}
 
-        {filtrados.length === 0 ? (
-          <div style={{ textAlign:"center", padding:"60px", color:"#2a2a2a" }}>
-            <Sparkles size={28} style={{ marginBottom:"10px", opacity:0.3 }} />
-            <p>No se encontraron perfumes.</p>
-          </div>
-        ) : (
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(150px, 1fr))", gap:"14px" }}>
-            {aplicarOrden(filtrados).map((p, i) => (
-              <ProductCard key={p.id || p.clave_unica || i} perfume={p} favoritos={favIds} onToggleFav={toggleFav} onClick={() => setDetalle(p)} />
-            ))}
-          </div>
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:"20px", flexWrap:"wrap", gap:"10px" }}>
+              <div style={{ display:"flex", gap:"8px", alignItems:"center", flexWrap:"wrap" }}>
+                {Object.entries(TIENDAS).map(([k,t]) => (
+                  <div key={k} style={{ display:"flex", alignItems:"center", gap:"4px" }}>
+                    <div style={{ width:"7px", height:"7px", borderRadius:"50%", background:t.color }} />
+                    <span style={{ color:"#333", fontSize:"0.7rem" }}>{t.label}</span>
+                  </div>
+                ))}
+                <span style={{ color:"#2a2a2a", fontSize:"0.7rem" }}>· {filtrados.length} perfumes</span>
+              </div>
+              <div style={{ display:"flex", gap:"4px" }}>
+                {[
+                  { id:"az",          label:"A-Z" },
+                  { id:"za",          label:"Z-A" },
+                  { id:"precio_asc",  label:"$ ↑" },
+                  { id:"precio_desc", label:"$ ↓" },
+                ].map(o => (
+                  <button key={o.id} onClick={() => setOrden(o.id)}
+                    style={{ padding:"4px 10px", borderRadius:"16px", border:`1px solid ${orden===o.id?"#c9a84c":"#1e1e1e"}`, background:orden===o.id?"rgba(201,168,76,0.08)":"transparent", color:orden===o.id?"#c9a84c":"#444", cursor:"pointer", fontSize:"0.72rem", fontWeight:orden===o.id?700:400, transition:"all 0.15s" }}>
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {filtrados.length === 0 ? (
+              <div style={{ textAlign:"center", padding:"60px", color:"#2a2a2a" }}>
+                <Sparkles size={28} style={{ marginBottom:"10px", opacity:0.3 }} />
+                <p>No se encontraron perfumes.</p>
+              </div>
+            ) : (
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(150px, 1fr))", gap:"14px" }}>
+                {aplicarOrden(filtrados).map((p, i) => (
+                  <ProductCard key={p.id || p.clave_unica || i} perfume={p} favoritos={favIds} onToggleFav={toggleFav} onClick={() => setDetalle(p)} />
+                ))}
+              </div>
+            )}
+          </>
         )}
       </main>
 
@@ -792,6 +850,12 @@ function GlobalStyles() {
       body { background:#080808; font-family:'DM Sans',sans-serif; color:#fff; }
       ::-webkit-scrollbar { width:3px; }
       ::-webkit-scrollbar-thumb { background:#1e1e1e; border-radius:2px; }
+      /* Skeleton shimmer: brillo que barre de izquierda a derecha */
+      @keyframes shimmer { 100% { transform: translateX(100%); } }
+      .sk { position:relative; overflow:hidden; background:#141414; border-radius:8px; }
+      .sk::after { content:""; position:absolute; inset:0; transform:translateX(-100%);
+        background:linear-gradient(90deg, transparent, rgba(255,255,255,0.05), transparent);
+        animation:shimmer 1.4s infinite; }
     `}</style>
   );
 }
